@@ -56,6 +56,7 @@ export function draftFromTask(task: SceneTask, knownNames: string[]) {
   const present = inferPresence(task.source, knownNames).present;
   const number = Number(task.sceneId.match(/\d+/)?.[0] ?? "1");
   const motion = MOTIONS[(Math.max(number, 1) - 1) % MOTIONS.length];
+  const marker = `beat${String(Math.max(number, 1)).padStart(3, "0")}`;
   const who =
     present.length === 0
       ? ""
@@ -63,13 +64,20 @@ export function draftFromTask(task: SceneTask, knownNames: string[]) {
         ? present[0]
         : `${present.slice(0, -1).join(", ")} and ${present[present.length - 1]}`;
   const body = who ? `${who} ${motion}` : `The quiet room showing ${motion}`;
-  const prompt = fit(`${body}, medium shot at eye level with shallow focus and a practical lamp`);
   const angleCycle = ["First-person POV", "Detail close-up", "Medium shot", "Wide shot"];
-  const angle = angleCycle[(Math.max(number, 1) - 1) % angleCycle.length];
+  const anglePhrase = [
+    "point of view at eye level with shallow focus and a practical lamp",
+    "detail close up at eye level with shallow focus and a practical lamp",
+    "medium shot at eye level with shallow focus and a practical lamp",
+    "wide shot at eye level with shallow focus and a practical lamp",
+  ];
+  const angleIndex = (Math.max(number, 1) - 1) % angleCycle.length;
+  const angle = angleCycle[angleIndex];
+  const prompt = fit(`${body}, ${anglePhrase[angleIndex]}`);
   return {
     scene_id: task.sceneId,
-    title: `Scene ${task.sceneId}`,
-    environment: `Location ${task.sceneId}`,
+    title: task.title?.trim() || `Scene ${task.sceneId}`,
+    environment: `Set ${marker}`,
     prompt,
     visible_cast: present,
     source_anchor: pickAnchor(task.source),

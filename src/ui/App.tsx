@@ -92,6 +92,7 @@ export function App() {
         <div className="top-progress">
           <span>{studio.doneCount} / {studio.scenes.length || 0} cảnh</span>
           <i><b style={{ width: `${counts.pct}%` }} /></i>
+          <span>{counts.pct}%</span>
         </div>
         <div className="top-actions">
           {studio.phase === "running" ? (
@@ -107,7 +108,7 @@ export function App() {
             </>
           )}
           <div className="menu">
-            <button className="btn" type="button" disabled={!usable} onClick={() => setExportOpen((open) => !open)}>Xuất</button>
+            <button className="btn" type="button" disabled={!usable} onClick={() => setExportOpen((open) => !open)}><DownloadIcon /> Xuất</button>
             {exportOpen && usable ? (
               <div className="menu-pop">
                 <button type="button" onClick={() => { void studio.copyAll(); setExportOpen(false); }}>Sao chép tất cả</button>
@@ -123,7 +124,7 @@ export function App() {
             {studio.report ? <i /> : null}
           </button>
           <button className="icon-btn" type="button" onClick={() => studio.setGuideOpen(true)} aria-label="Hướng dẫn">?</button>
-          <button className="icon-btn" type="button" onClick={() => studio.setTheme(studio.theme === "dark" ? "light" : "dark")} aria-label="Đổi nền">
+          <button className="icon-btn sun" type="button" onClick={() => studio.setTheme(studio.theme === "dark" ? "light" : "dark")} aria-label="Đổi nền">
             <ThemeIcon dark={studio.theme === "dark"} />
           </button>
         </div>
@@ -148,12 +149,19 @@ export function App() {
         </nav>
         <div className="main">
           <section className="summary">
-            <Stat icon="▦" n={studio.fileName || "Chưa mở file"} label="Tổng quan dự án" />
+            <div className="stat overview-stat">
+              <span className="ico" aria-hidden="true">▦</span>
+              <div>
+                <strong>Tổng quan dự án</strong>
+                <span>{studio.fileName || "Chưa mở file"}</span>
+              </div>
+            </div>
             <Stat icon="▣" n={studio.scenes.length} label="Tổng số cảnh" />
-            <Stat icon="✓" n={counts.done} label="Đã hoàn thành" />
+            <Stat icon="✓" n={counts.done} label="Đã hoàn thành" tone="good" />
             <Stat icon="◷" n={counts.waiting} label="Đang chờ" />
-            <Stat icon="△" n={counts.review} label="Cần kiểm tra" />
-            <Stat icon="◉" n={`${counts.pct}%`} label={savedAt ? `Lưu ${formatClock(savedAt)}` : "Tiến độ"} />
+            <Stat icon="△" n={counts.review} label="Cần kiểm tra" tone="warn" />
+            <span className="ring" style={{ ["--p" as string]: String(counts.pct) }}>{counts.pct}%</span>
+            <p className="saved">{savedAt ? <>Đã lưu tự động<br />{formatClock(savedAt)}, {new Date(savedAt).toLocaleDateString("vi-VN")}</> : "Chưa lưu tự động"}</p>
           </section>
           <div className="work">
         {rail === "file" ? (
@@ -244,18 +252,6 @@ function shortClock(value: string) {
   const minutes = Math.floor(safe / 60);
   const seconds = safe % 60;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-function spanSeconds(timeRange?: string, fallback?: string) {
-  if (!timeRange) return fallback || "Cảnh";
-  const parts = timeRange.split(" - ");
-  if (parts.length !== 2) return fallback || timeRange;
-  const toSeconds = (value: string) => {
-    const [minutes, seconds] = value.split(":").map((part) => Number(part) || 0);
-    return minutes * 60 + seconds;
-  };
-  const seconds = Math.max(0, Math.round(toSeconds(parts[1]) - toSeconds(parts[0])));
-  return seconds ? `${seconds}s` : fallback || timeRange;
 }
 
 function Stat({ n, label, icon, tone }: { n: number | string; label: string; icon?: string; tone?: "good" | "warn" }) {
@@ -361,6 +357,7 @@ function SceneStage({
 }) {
   const [draft, setDraft] = useState({ title, environment: "", prompt: "", cast: "" });
   const [zoom, setZoom] = useState(false);
+  const [crop, setCrop] = useState(0);
   useEffect(() => {
     setDraft({
       title: result?.title || title,
@@ -391,8 +388,8 @@ function SceneStage({
     <section className="editor">
       <header className="editor-head">
         <div>
-          <p className="kicker">{[timeRange, title].filter(Boolean).join(" · ") || "Cảnh"}</p>
-          <h1>#{sceneId} · {spanSeconds(timeRange, cutReason)}</h1>
+          <p className="time-line">{timeRange || "Cảnh"}</p>
+          <h1>#{sceneId} {cutReason || title || "Cảnh"}</h1>
         </div>
         <div className="pager">
           <button className="btn small" type="button" onClick={onPrev} disabled={index <= 0}>‹ Cảnh trước</button>
@@ -401,14 +398,29 @@ function SceneStage({
         </div>
       </header>
       <div className="editor-grid">
-        <div className="stack">
         <article className="card speech">
           <header className="card-h">
-            <h2>Lời thoại gốc</h2>
-            <button className="btn tiny" type="button" onClick={() => void navigator.clipboard.writeText(source)}>Sao chép</button>
+            <h2>Lời thoại gốc (Tiếng Anh)</h2>
+            <span className="badge">SRT</span>
           </header>
-          <textarea readOnly value={source} aria-label="Lời thoại gốc" rows={5} />
-          <div className="count">{source.length.toLocaleString("vi-VN")} ký tự</div>
+          <p className="copy">{source || "Chưa có lời thoại."}</p>
+          <div className="count">{source.length.toLocaleString("vi-VN")} / 1.000</div>
+        </article>
+        <article className="card preview-card">
+          <div className="photo">
+            <img src="/preview.jpg" alt="Ảnh minh họa" style={{ objectPosition: CROPS[crop] }} />
+            <span className="frame-label">Ảnh minh họa</span>
+            <button className="btn tiny zoom" type="button" onClick={() => setZoom(true)} aria-label="Phóng to">⛶</button>
+          </div>
+          <div className="thumbs">
+            <button type="button" className="thumb-nav" onClick={() => setCrop((value) => (value + CROPS.length - 1) % CROPS.length)} aria-label="Ảnh trước">‹</button>
+            {CROPS.map((position, thumb) => (
+              <button key={position} type="button" className={thumb === crop ? "on" : ""} onClick={() => setCrop(thumb)} aria-label={`Ảnh ${thumb + 1}`}>
+                <img src="/preview.jpg" alt="" style={{ objectPosition: position }} />
+              </button>
+            ))}
+            <button type="button" className="thumb-nav" onClick={() => setCrop((value) => (value + 1) % CROPS.length)} aria-label="Ảnh sau">›</button>
+          </div>
         </article>
         <article className="card prompt-card">
           <header className="card-h">
@@ -424,21 +436,9 @@ function SceneStage({
               {STYLES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
             </select>
           </header>
-          <textarea value={draft.prompt} aria-label="Prompt" rows={6} placeholder="Chưa có prompt." onChange={(event) => setDraft({ ...draft, prompt: event.target.value })} />
-          <div className="count">{draft.prompt.length.toLocaleString("vi-VN")} ký tự</div>
+          <textarea value={draft.prompt} aria-label="Prompt" rows={4} placeholder="Chưa có prompt." onChange={(event) => setDraft({ ...draft, prompt: event.target.value })} />
+          <div className="count">{draft.prompt.length.toLocaleString("vi-VN")} / 2.000</div>
           {result?.rejections.length ? <ul className="reasons">{result.rejections.map((reason) => <li key={reason.code}>{reason.detail}</li>)}</ul> : null}
-        </article>
-        </div>
-        <article className="card preview-card">
-          <div className="photo">
-            <img src="/preview.jpg" alt="Ảnh minh họa mẫu, phố mùa đông" />
-            <span className="frame-label">Ảnh minh họa mẫu</span>
-            <button className="btn tiny zoom" type="button" onClick={() => setZoom(true)} aria-label="Phóng to">⛶</button>
-          </div>
-          <div className="thumbs">
-            <img src="/preview.jpg" alt="" />
-            <small>Ảnh demo • chưa kết nối AI</small>
-          </div>
         </article>
       </div>
       {zoom ? (
@@ -447,7 +447,7 @@ function SceneStage({
         </dialog>
       ) : null}
       <footer className="editor-bar">
-        <button className="btn primary" type="button" disabled={studio.phase === "running"} onClick={() => void studio.run(studio.lastMode, { only: [sceneId], prior: studio.results.map((item) => item.sceneId === sceneId ? { ...item, status: "pending", attempts: 0, prompt: "", rejections: [] } : item) })}>Viết lại prompt</button>
+        <button className="btn" type="button" disabled={studio.phase === "running"} onClick={() => void studio.run(studio.lastMode, { only: [sceneId], prior: studio.results.map((item) => item.sceneId === sceneId ? { ...item, status: "pending", attempts: 0, prompt: "", rejections: [] } : item) })}>Viết lại prompt</button>
         <button className="btn" type="button" onClick={() => void navigator.clipboard.writeText(shown || draft.prompt)}>Sao chép</button>
         <button className="btn ghost" type="button" onClick={() => setDraft({ ...draft, prompt: "" })}>Xóa nội dung</button>
         <label className="status-select">Trạng thái:
@@ -512,8 +512,13 @@ function Guide({ onClose }: { onClose: () => void }) {
 function HomeIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11 12 4l8 7v9H4z" /></svg>;
 }
+const CROPS = ["center", "20% center", "80% center", "center 30%"];
+
 function PlayIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7v10l8-5z" fill="currentColor" stroke="none" /></svg>;
+}
+function DownloadIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10M8 10l4 4 4-4M6 19h12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>;
 }
 function ThemeIcon({ dark }: { dark: boolean }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r={dark ? 4 : 5} /><path d="M12 3v2M12 19v2M3 12h2M19 12h2" /></svg>;

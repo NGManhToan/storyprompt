@@ -83,16 +83,15 @@ export function App() {
     <div className="workspace">
       <header className="topbar">
         <div className="brand">
-          <span className="mark" aria-hidden="true" />
+          <span className="mark" aria-hidden="true">▶</span>
           <strong>StoryPrompt</strong>
         </div>
         <button className="file-chip" type="button" onClick={() => setRail("file")}>
-          {studio.fileName || "Chưa có file"}
+          ▤ {studio.fileName || "Chưa có file"} ⌄
         </button>
         <div className="top-progress">
-          <span>{studio.doneCount}/{studio.scenes.length || 0} cảnh</span>
+          <span>{studio.doneCount} / {studio.scenes.length || 0} cảnh</span>
           <i><b style={{ width: `${counts.pct}%` }} /></i>
-          <span>{counts.pct}%</span>
         </div>
         <div className="top-actions">
           {studio.phase === "running" ? (
@@ -149,16 +148,12 @@ export function App() {
         </nav>
         <div className="main">
           <section className="summary">
-            <div className="overview">
-              <p>Tổng quan dự án</p>
-              <strong>{studio.fileName || "Chưa mở file"}</strong>
-            </div>
-            <Stat n={studio.scenes.length} label="Tổng số cảnh" />
-            <Stat n={counts.done} label="Đã hoàn thành" tone="good" />
-            <Stat n={counts.waiting} label="Đang chờ" />
-            <Stat n={counts.review} label="Cần kiểm tra" tone="warn" />
-            <span className="ring" style={{ ["--p" as string]: String(counts.pct) }}>{counts.pct}%</span>
-            <p className="saved">{savedAt ? `Đã lưu tự động ${new Date(savedAt).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric" })}` : "Chưa lưu tự động"}</p>
+            <Stat icon="▦" n={studio.fileName || "Chưa mở file"} label="Tổng quan dự án" />
+            <Stat icon="▣" n={studio.scenes.length} label="Tổng số cảnh" />
+            <Stat icon="✓" n={counts.done} label="Đã hoàn thành" />
+            <Stat icon="◷" n={counts.waiting} label="Đang chờ" />
+            <Stat icon="△" n={counts.review} label="Cần kiểm tra" />
+            <Stat icon="◉" n={`${counts.pct}%`} label={savedAt ? `Lưu ${formatClock(savedAt)}` : "Tiến độ"} />
           </section>
           <div className="work">
         {rail === "file" ? (
@@ -214,7 +209,7 @@ export function App() {
               sceneId={selected.sceneId}
               title={selected.title}
               source={selected.source}
-              timeRange={selected.timeRange}
+              timeRange={selected.timeRange || clockRange(selected.start, selected.end)}
               cutReason={selected.cutReason}
               result={selectedResult}
               onPrev={() => selectedIndex > 0 && setSelectedId(studio.scenes[selectedIndex - 1].sceneId)}
@@ -237,11 +232,40 @@ function oneLine(text: string) {
   return text.replace(/\s+/g, " ").trim().slice(0, 42);
 }
 
-function Stat({ n, label, tone }: { n: number; label: string; tone?: "good" | "warn" }) {
+function clockRange(start?: string, end?: string) {
+  if (!start || !end) return undefined;
+  return `${shortClock(start)} - ${shortClock(end)}`;
+}
+
+function shortClock(value: string) {
+  const numbers = value.replace(",", ".").split(":").map((part) => Number.parseFloat(part) || 0);
+  const total = numbers.length === 3 ? numbers[0] * 3600 + numbers[1] * 60 + numbers[2] : numbers[0] * 60 + (numbers[1] || 0);
+  const safe = Math.max(0, Math.floor(total));
+  const minutes = Math.floor(safe / 60);
+  const seconds = safe % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function spanSeconds(timeRange?: string, fallback?: string) {
+  if (!timeRange) return fallback || "Cảnh";
+  const parts = timeRange.split(" - ");
+  if (parts.length !== 2) return fallback || timeRange;
+  const toSeconds = (value: string) => {
+    const [minutes, seconds] = value.split(":").map((part) => Number(part) || 0);
+    return minutes * 60 + seconds;
+  };
+  const seconds = Math.max(0, Math.round(toSeconds(parts[1]) - toSeconds(parts[0])));
+  return seconds ? `${seconds}s` : fallback || timeRange;
+}
+
+function Stat({ n, label, icon, tone }: { n: number | string; label: string; icon?: string; tone?: "good" | "warn" }) {
   return (
     <div className={tone ? `stat ${tone}` : "stat"}>
-      <strong>{n}</strong>
-      <span>{label}</span>
+      {icon ? <span className="ico" aria-hidden="true">{icon}</span> : null}
+      <div>
+        <strong>{n}</strong>
+        <span>{label}</span>
+      </div>
     </div>
   );
 }
@@ -336,6 +360,7 @@ function SceneStage({
   onNext: () => void;
 }) {
   const [draft, setDraft] = useState({ title, environment: "", prompt: "", cast: "" });
+  const [zoom, setZoom] = useState(false);
   useEffect(() => {
     setDraft({
       title: result?.title || title,
@@ -366,8 +391,8 @@ function SceneStage({
     <section className="editor">
       <header className="editor-head">
         <div>
-          <p className="kicker">{timeRange || "Cảnh"}</p>
-          <h1>#{sceneId} {cutReason || title || "Cảnh"}</h1>
+          <p className="kicker">{[timeRange, title].filter(Boolean).join(" · ") || "Cảnh"}</p>
+          <h1>#{sceneId} · {spanSeconds(timeRange, cutReason)}</h1>
         </div>
         <div className="pager">
           <button className="btn small" type="button" onClick={onPrev} disabled={index <= 0}>‹ Cảnh trước</button>
@@ -376,24 +401,14 @@ function SceneStage({
         </div>
       </header>
       <div className="editor-grid">
+        <div className="stack">
         <article className="card speech">
           <header className="card-h">
-            <h2>Lời thoại gốc (Tiếng Anh)</h2>
-            <span className="badge">SRT</span>
+            <h2>Lời thoại gốc</h2>
+            <button className="btn tiny" type="button" onClick={() => void navigator.clipboard.writeText(source)}>Sao chép</button>
           </header>
-          <p className="copy">{source}</p>
-          <span className="count">{source.length.toLocaleString("vi-VN")} / 1.000</span>
-        </article>
-        <article className="card frame">
-          <div className="frame-well">
-            <span className="frame-label">Ảnh minh họa</span>
-            <p>Khung dành cho ảnh Google Flow</p>
-          </div>
-          <div className="thumbs" aria-hidden="true">
-            <button type="button" className="thumb-nav">‹</button>
-            <span /><span /><span /><span />
-            <button type="button" className="thumb-nav">›</button>
-          </div>
+          <textarea readOnly value={source} aria-label="Lời thoại gốc" rows={5} />
+          <div className="count">{source.length.toLocaleString("vi-VN")} ký tự</div>
         </article>
         <article className="card prompt-card">
           <header className="card-h">
@@ -409,13 +424,30 @@ function SceneStage({
               {STYLES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
             </select>
           </header>
-          <textarea value={draft.prompt} aria-label="Prompt" rows={5} placeholder="Chưa có prompt." onChange={(event) => setDraft({ ...draft, prompt: event.target.value })} />
-          <span className="count">{draft.prompt.length.toLocaleString("vi-VN")} / 2.000</span>
+          <textarea value={draft.prompt} aria-label="Prompt" rows={6} placeholder="Chưa có prompt." onChange={(event) => setDraft({ ...draft, prompt: event.target.value })} />
+          <div className="count">{draft.prompt.length.toLocaleString("vi-VN")} ký tự</div>
           {result?.rejections.length ? <ul className="reasons">{result.rejections.map((reason) => <li key={reason.code}>{reason.detail}</li>)}</ul> : null}
         </article>
+        </div>
+        <article className="card preview-card">
+          <div className="photo">
+            <img src="/preview.jpg" alt="Ảnh minh họa mẫu, phố mùa đông" />
+            <span className="frame-label">Ảnh minh họa mẫu</span>
+            <button className="btn tiny zoom" type="button" onClick={() => setZoom(true)} aria-label="Phóng to">⛶</button>
+          </div>
+          <div className="thumbs">
+            <img src="/preview.jpg" alt="" />
+            <small>Ảnh demo • chưa kết nối AI</small>
+          </div>
+        </article>
       </div>
+      {zoom ? (
+        <dialog className="lightbox" open onClick={() => setZoom(false)}>
+          <img src="/preview.jpg" alt="Ảnh minh họa mẫu phóng to" />
+        </dialog>
+      ) : null}
       <footer className="editor-bar">
-        <button className="btn" type="button" disabled={studio.phase === "running"} onClick={() => void studio.run(studio.lastMode, { only: [sceneId], prior: studio.results.map((item) => item.sceneId === sceneId ? { ...item, status: "pending", attempts: 0, prompt: "", rejections: [] } : item) })}>Viết lại prompt</button>
+        <button className="btn primary" type="button" disabled={studio.phase === "running"} onClick={() => void studio.run(studio.lastMode, { only: [sceneId], prior: studio.results.map((item) => item.sceneId === sceneId ? { ...item, status: "pending", attempts: 0, prompt: "", rejections: [] } : item) })}>Viết lại prompt</button>
         <button className="btn" type="button" onClick={() => void navigator.clipboard.writeText(shown || draft.prompt)}>Sao chép</button>
         <button className="btn ghost" type="button" onClick={() => setDraft({ ...draft, prompt: "" })}>Xóa nội dung</button>
         <label className="status-select">Trạng thái:

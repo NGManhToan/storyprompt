@@ -1,4 +1,31 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  AlertTriangle,
+  Bell,
+  Check,
+  Clock,
+  Cloud,
+  Copy,
+  Download,
+  FileText,
+  Folder,
+  House,
+  ImagePlus,
+  LayoutList,
+  Maximize2,
+  Moon,
+  PanelLeft,
+  Play,
+  RefreshCw,
+  Save,
+  Search,
+  Settings,
+  Sun,
+  Trash2,
+  Upload,
+  BarChart3,
+  CircleHelp,
+} from "lucide-react";
 import type { SceneResult } from "../core/types.js";
 import { wrapPrompt } from "../core/export.js";
 import { useStudio } from "./useStudio.js";
@@ -41,6 +68,8 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [listOpen, setListOpen] = useState(true);
+  const [stills, setStills] = useState<Record<string, string[]>>({});
 
   const selected = studio.scenes.find((scene) => scene.sceneId === selectedId) ?? studio.scenes[0];
   const selectedResult = studio.results.find((row) => row.sceneId === selected?.sceneId);
@@ -83,11 +112,11 @@ export function App() {
     <div className="workspace">
       <header className="topbar">
         <div className="brand">
-          <span className="mark" aria-hidden="true">▶</span>
+          <span className="mark" aria-hidden="true"><Play size={16} fill="currentColor" /></span>
           <strong>StoryPrompt</strong>
         </div>
-        <button className="file-chip" type="button" onClick={() => setRail("file")}>
-          ▤ {studio.fileName || "Chưa có file"} ⌄
+        <button className="file-chip" type="button" onClick={() => setRail("file")} title="Đổi tệp">
+          <FileText size={16} /> {studio.fileName || "Chưa có file"}
         </button>
         <div className="top-progress">
           <span>{studio.doneCount} / {studio.scenes.length || 0} cảnh</span>
@@ -99,16 +128,16 @@ export function App() {
             <button className="btn danger" type="button" onClick={studio.stop}>Dừng</button>
           ) : (
             <>
-              <button className="btn" type="button" disabled={!studio.scenes.length} onClick={() => void studio.run("mock", { fresh: !continueRun })}>
-                <PlayIcon /> Mô phỏng
+              <button className="btn" type="button" title="Mô phỏng, không gọi API" disabled={!studio.scenes.length} onClick={() => void studio.run("mock", { fresh: !continueRun })}>
+                <Play size={16} /> Mô phỏng
               </button>
-              <button className="btn primary" type="button" disabled={!studio.scenes.length} onClick={() => void studio.run("live", { fresh: !continueRun })}>
-                <PlayIcon /> Chạy
+              <button className="btn primary" type="button" title="Chạy với API đã cấu hình" disabled={!studio.scenes.length} onClick={() => void studio.run("live", { fresh: !continueRun })}>
+                <Play size={16} /> Chạy
               </button>
             </>
           )}
           <div className="menu">
-            <button className="btn" type="button" disabled={!usable} onClick={() => setExportOpen((open) => !open)}><DownloadIcon /> Xuất</button>
+            <button className="btn" type="button" title="Xuất prompt" disabled={!usable} onClick={() => setExportOpen((open) => !open)}><Download size={16} /> Xuất</button>
             {exportOpen && usable ? (
               <div className="menu-pop">
                 <button type="button" onClick={() => { void studio.copyAll(); setExportOpen(false); }}>Sao chép tất cả</button>
@@ -119,13 +148,15 @@ export function App() {
               </div>
             ) : null}
           </div>
-          <button className="icon-btn" type="button" onClick={() => setRail("report")} aria-label="Báo cáo">
-            <BellIcon />
+          <button className="icon-btn" type="button" onClick={() => setRail("report")} aria-label="Báo cáo" title="Báo cáo">
+            <Bell size={18} />
             {studio.report ? <i /> : null}
           </button>
-          <button className="icon-btn" type="button" onClick={() => studio.setGuideOpen(true)} aria-label="Hướng dẫn">?</button>
-          <button className="icon-btn sun" type="button" onClick={() => studio.setTheme(studio.theme === "dark" ? "light" : "dark")} aria-label="Đổi nền">
-            <ThemeIcon dark={studio.theme === "dark"} />
+          <button className="icon-btn" type="button" onClick={() => studio.setGuideOpen(true)} aria-label="Hướng dẫn" title="Hướng dẫn">
+            <CircleHelp size={18} />
+          </button>
+          <button className="icon-btn sun" type="button" onClick={() => studio.setTheme(studio.theme === "dark" ? "light" : "dark")} aria-label="Đổi nền" title="Đổi nền">
+            {studio.theme === "dark" ? <Moon size={18} /> : <Sun size={18} />}
           </button>
         </div>
       </header>
@@ -139,38 +170,43 @@ export function App() {
         </div>
       ) : null}
 
-      <div className="body">
+      <div className={listOpen ? "body" : "body list-closed"}>
         <nav className="icon-rail" aria-label="Điều hướng">
-          <button type="button" onClick={() => setRail("scenes")} aria-label="Tổng quan"><HomeIcon /></button>
-          <button type="button" className={rail === "scenes" ? "on" : ""} onClick={() => setRail("scenes")} aria-label="Cảnh"><ListIcon /></button>
-          <button type="button" className={rail === "report" ? "on" : ""} onClick={() => setRail("report")} aria-label="Báo cáo"><ChartIcon /></button>
-          <button type="button" className={rail === "file" ? "on" : ""} onClick={() => setRail("file")} aria-label="Tệp"><FolderIcon /></button>
-          <button type="button" onClick={() => studio.setSettingsOpen(true)} aria-label="Cài đặt"><GearIcon /></button>
+          <button type="button" onClick={() => setRail("scenes")} aria-label="Tổng quan" title="Tổng quan"><House size={20} /></button>
+          <button type="button" className={rail === "scenes" ? "on" : ""} onClick={() => { setRail("scenes"); setListOpen(true); }} aria-label="Cảnh" title="Danh sách cảnh"><LayoutList size={20} /></button>
+          <button type="button" className={rail === "report" ? "on" : ""} onClick={() => setRail("report")} aria-label="Báo cáo" title="Báo cáo"><BarChart3 size={20} /></button>
+          <button type="button" className={rail === "file" ? "on" : ""} onClick={() => setRail("file")} aria-label="Tệp" title="Tệp"><Folder size={20} /></button>
+          <button type="button" onClick={() => studio.setSettingsOpen(true)} aria-label="Cài đặt" title="Cài đặt"><Settings size={20} /></button>
+          <button className="rail-end" type="button" onClick={() => setListOpen((open) => !open)} aria-label={listOpen ? "Thu danh sách" : "Mở danh sách"} title={listOpen ? "Thu danh sách" : "Mở danh sách"}><PanelLeft size={20} /></button>
         </nav>
         <div className="main">
           <section className="summary">
             <div className="stat overview-stat">
-              <span className="ico" aria-hidden="true">▦</span>
+              <span className="ico" aria-hidden="true"><FileText size={18} /></span>
               <div>
                 <strong>Tổng quan dự án</strong>
                 <span>{studio.fileName || "Chưa mở file"}</span>
               </div>
             </div>
-            <Stat icon="▣" n={studio.scenes.length} label="Tổng số cảnh" />
-            <Stat icon="✓" n={counts.done} label="Đã hoàn thành" tone="good" />
-            <Stat icon="◷" n={counts.waiting} label="Đang chờ" />
-            <Stat icon="△" n={counts.review} label="Cần kiểm tra" tone="warn" />
+            <Stat icon={<LayoutList size={18} />} n={studio.scenes.length} label="Tổng số cảnh" />
+            <Stat icon={<Check size={18} />} n={counts.done} label="Đã hoàn thành" tone="good" />
+            <Stat icon={<Clock size={18} />} n={counts.waiting} label="Đang chờ" />
+            <Stat icon={<AlertTriangle size={18} />} n={counts.review} label="Cần kiểm tra" tone="warn" />
             <span className="ring" style={{ ["--p" as string]: String(counts.pct) }}>{counts.pct}%</span>
-            <p className="saved">{savedAt ? <>Đã lưu tự động<br />{formatClock(savedAt)}, {new Date(savedAt).toLocaleDateString("vi-VN")}</> : "Chưa lưu tự động"}</p>
+            <p className="saved"><Cloud size={16} /> {savedAt ? `Đã lưu ${formatClock(savedAt)}` : "Chưa lưu"}</p>
           </section>
+          {studio.scenes.length === 0 && rail === "scenes" ? (
+            <EmptyStudio studio={studio} dragOver={dragOver} setDragOver={setDragOver} />
+          ) : (
           <div className="work">
         {rail === "file" ? (
           <FileColumn studio={studio} dragOver={dragOver} setDragOver={setDragOver} />
         ) : rail === "report" ? (
           <ReportColumn studio={studio} counts={counts} savedAt={savedAt} />
-        ) : (
+        ) : listOpen ? (
           <aside className="scene-col">
             <div className="search-row">
+              <Search size={16} />
               <input className="search" value={query} placeholder="Tìm cảnh hoặc lời thoại..." aria-label="Tìm cảnh" onChange={(event) => setQuery(event.target.value)} />
             </div>
             <div className="filters">
@@ -193,13 +229,13 @@ export function App() {
                     <span className={`dot ${row?.status ?? "pending"}`} />
                     <span className="sid">#{scene.sceneId}</span>
                     <span className="stime">{scene.timeRange || oneLine(scene.source)}</span>
-                    <span className="sst">{STATUS_LABEL[row?.status ?? "pending"]}</span>
+                    <span className={`sst ${row?.status ?? "pending"}`}>{STATUS_LABEL[row?.status ?? "pending"]}</span>
                   </button>
                 );
               })}
             </div>
           </aside>
-        )}
+        ) : null}
 
         <main className="stage">
           {!selected ? (
@@ -219,6 +255,11 @@ export function App() {
               source={selected.source}
               timeRange={selected.timeRange || clockRange(selected.start, selected.end)}
               cutReason={selected.cutReason}
+              images={stills[selected.sceneId] ?? []}
+              onAddImages={(files) => {
+                const urls = [...files].map((file) => URL.createObjectURL(file));
+                setStills((current) => ({ ...current, [selected.sceneId]: [...(current[selected.sceneId] ?? []), ...urls] }));
+              }}
               result={selectedResult}
               onPrev={() => selectedIndex > 0 && setSelectedId(studio.scenes[selectedIndex - 1].sceneId)}
               onNext={() => selectedIndex < studio.scenes.length - 1 && setSelectedId(studio.scenes[selectedIndex + 1].sceneId)}
@@ -226,6 +267,7 @@ export function App() {
           )}
         </main>
           </div>
+          )}
         </div>
       </div>
 
@@ -254,7 +296,7 @@ function shortClock(value: string) {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function Stat({ n, label, icon, tone }: { n: number | string; label: string; icon?: string; tone?: "good" | "warn" }) {
+function Stat({ n, label, icon, tone }: { n: number | string; label: string; icon?: ReactNode; tone?: "good" | "warn" }) {
   return (
     <div className={tone ? `stat ${tone}` : "stat"}>
       {icon ? <span className="ico" aria-hidden="true">{icon}</span> : null}
@@ -341,7 +383,7 @@ function formatDuration(ms: number) {
 }
 
 function SceneStage({
-  studio, index, total, sceneId, title, source, timeRange, cutReason, result, onPrev, onNext,
+  studio, index, total, sceneId, title, source,   timeRange, cutReason, images, onAddImages, result, onPrev, onNext,
 }: {
   studio: ReturnType<typeof useStudio>;
   index: number;
@@ -351,13 +393,14 @@ function SceneStage({
   source: string;
   timeRange?: string;
   cutReason?: string;
+  images: string[];
+  onAddImages: (files: FileList) => void;
   result?: SceneResult;
   onPrev: () => void;
   onNext: () => void;
 }) {
   const [draft, setDraft] = useState({ title, environment: "", prompt: "", cast: "" });
-  const [zoom, setZoom] = useState(false);
-  const [crop, setCrop] = useState(0);
+  const [copied, setCopied] = useState(false);
   useEffect(() => {
     setDraft({
       title: result?.title || title,
@@ -397,30 +440,15 @@ function SceneStage({
           <button className="btn small" type="button" onClick={onNext} disabled={index >= total - 1}>Cảnh sau ›</button>
         </div>
       </header>
-      <div className="editor-grid">
+      <div className={images.length ? "editor-grid has-still" : "editor-grid"}>
+        <div className="stack">
         <article className="card speech">
           <header className="card-h">
-            <h2>Lời thoại gốc (Tiếng Anh)</h2>
+            <h2>Lời thoại gốc</h2>
             <span className="badge">SRT</span>
           </header>
           <p className="copy">{source || "Chưa có lời thoại."}</p>
           <div className="count">{source.length.toLocaleString("vi-VN")} / 1.000</div>
-        </article>
-        <article className="card preview-card">
-          <div className="photo">
-            <img src="/preview.jpg" alt="Ảnh minh họa" style={{ objectPosition: CROPS[crop] }} />
-            <span className="frame-label">Ảnh minh họa</span>
-            <button className="btn tiny zoom" type="button" onClick={() => setZoom(true)} aria-label="Phóng to">⛶</button>
-          </div>
-          <div className="thumbs">
-            <button type="button" className="thumb-nav" onClick={() => setCrop((value) => (value + CROPS.length - 1) % CROPS.length)} aria-label="Ảnh trước">‹</button>
-            {CROPS.map((position, thumb) => (
-              <button key={position} type="button" className={thumb === crop ? "on" : ""} onClick={() => setCrop(thumb)} aria-label={`Ảnh ${thumb + 1}`}>
-                <img src="/preview.jpg" alt="" style={{ objectPosition: position }} />
-              </button>
-            ))}
-            <button type="button" className="thumb-nav" onClick={() => setCrop((value) => (value + 1) % CROPS.length)} aria-label="Ảnh sau">›</button>
-          </div>
         </article>
         <article className="card prompt-card">
           <header className="card-h">
@@ -440,22 +468,23 @@ function SceneStage({
           <div className="count">{draft.prompt.length.toLocaleString("vi-VN")} / 2.000</div>
           {result?.rejections.length ? <ul className="reasons">{result.rejections.map((reason) => <li key={reason.code}>{reason.detail}</li>)}</ul> : null}
         </article>
+        </div>
+        {images.length ? <StillColumn images={images} /> : null}
       </div>
-      {zoom ? (
-        <dialog className="lightbox" open onClick={() => setZoom(false)}>
-          <img src="/preview.jpg" alt="Ảnh minh họa mẫu phóng to" />
-        </dialog>
-      ) : null}
       <footer className="editor-bar">
-        <button className="btn" type="button" disabled={studio.phase === "running"} onClick={() => void studio.run(studio.lastMode, { only: [sceneId], prior: studio.results.map((item) => item.sceneId === sceneId ? { ...item, status: "pending", attempts: 0, prompt: "", rejections: [] } : item) })}>Viết lại prompt</button>
-        <button className="btn" type="button" onClick={() => void navigator.clipboard.writeText(shown || draft.prompt)}>Sao chép</button>
-        <button className="btn ghost" type="button" onClick={() => setDraft({ ...draft, prompt: "" })}>Xóa nội dung</button>
+        <button className="btn" type="button" title="Viết lại prompt cảnh này" disabled={studio.phase === "running"} onClick={() => void studio.run(studio.lastMode, { only: [sceneId], prior: studio.results.map((item) => item.sceneId === sceneId ? { ...item, status: "pending", attempts: 0, prompt: "", rejections: [] } : item) })}><RefreshCw size={16} /> Viết lại prompt</button>
+        <button className="btn" type="button" title="Sao chép prompt" onClick={() => { void navigator.clipboard.writeText(shown || draft.prompt); setCopied(true); window.setTimeout(() => setCopied(false), 1400); }}>{copied ? <Check size={16} /> : <Copy size={16} />} {copied ? "Đã chép" : "Sao chép"}</button>
+        <button className="btn ghost" type="button" title="Xóa nội dung prompt" onClick={() => setDraft({ ...draft, prompt: "" })}><Trash2 size={16} /> Xóa nội dung</button>
+        <label className="btn" title="Gắn ảnh cho cảnh này">
+          <ImagePlus size={16} /> Thêm ảnh
+          <input type="file" accept="image/*" multiple hidden onChange={(event) => { if (event.target.files?.length) onAddImages(event.target.files); event.target.value = ""; }} />
+        </label>
         <label className="status-select">Trạng thái:
           <select value={result?.status ?? "pending"} disabled aria-label="Trạng thái">
             <option value={result?.status ?? "pending"}>{STATUS_LABEL[result?.status ?? "pending"]}</option>
           </select>
         </label>
-        <button className="btn primary" type="button" onClick={() => studio.saveEdit(sceneId, { ...draft, cast: draft.cast || result?.visibleCast.join(", ") || "" })}>Lưu (Ctrl + S)</button>
+        <button className="btn primary" type="button" title="Lưu (Ctrl + S)" onClick={() => studio.saveEdit(sceneId, { ...draft, cast: draft.cast || result?.visibleCast.join(", ") || "" })}><Save size={16} /> Lưu</button>
       </footer>
     </section>
   );
@@ -497,44 +526,62 @@ function SettingsDrawer({ studio, onClose }: { studio: ReturnType<typeof useStud
   );
 }
 
+function StillColumn({ images }: { images: string[] }) {
+  const [index, setIndex] = useState(0);
+  const [zoom, setZoom] = useState(false);
+  const safe = Math.min(index, Math.max(0, images.length - 1));
+  const src = images[safe];
+  if (!src) return null;
+  return (
+    <article className="card preview-card">
+      <div className="photo">
+        <img src={src} alt="Ảnh minh họa của cảnh" />
+        <span className="frame-label">Ảnh minh họa</span>
+        <button className="btn tiny zoom" type="button" onClick={() => setZoom(true)} aria-label="Phóng to"><Maximize2 size={14} /></button>
+      </div>
+      {images.length > 1 ? (
+        <div className="thumbs">
+          <button type="button" className="thumb-nav" onClick={() => setIndex((value) => (value + images.length - 1) % images.length)} aria-label="Ảnh trước">‹</button>
+          {images.map((item, thumb) => (
+            <button key={`${thumb}-${item}`} type="button" className={thumb === safe ? "on" : ""} onClick={() => setIndex(thumb)} aria-label={`Ảnh ${thumb + 1}`}>
+              <img src={item} alt="" />
+            </button>
+          ))}
+          <button type="button" className="thumb-nav" onClick={() => setIndex((value) => (value + 1) % images.length)} aria-label="Ảnh sau">›</button>
+        </div>
+      ) : null}
+      {zoom ? (
+        <dialog className="lightbox" open onClick={() => setZoom(false)}>
+          <img src={src} alt="Ảnh minh họa phóng to" />
+        </dialog>
+      ) : null}
+    </article>
+  );
+}
+
+function EmptyStudio({ studio, dragOver, setDragOver }: { studio: ReturnType<typeof useStudio>; dragOver: boolean; setDragOver: (value: boolean) => void }) {
+  return (
+    <section className="empty-screen">
+      <article className="card empty-card">
+        <span className="ico" aria-hidden="true"><Upload size={22} /></span>
+        <h1>Mở kịch bản</h1>
+        <p className="muted">Thả file .srt hoặc .txt. App chia cảnh và viết prompt tiếng Anh cho Google Flow.</p>
+        <DropBox studio={studio} dragOver={dragOver} setDragOver={setDragOver} />
+        <button className="btn primary" type="button" onClick={() => void studio.loadSample()}><FileText size={16} /> Mở file mẫu</button>
+      </article>
+    </section>
+  );
+}
+
 function Guide({ onClose }: { onClose: () => void }) {
   return (
     <div className="scrim center" onClick={onClose} role="presentation">
       <article className="guide" role="dialog" aria-labelledby="guide-title" onClick={(event) => event.stopPropagation()}>
         <div className="row-between"><h2 id="guide-title">Cách dùng</h2><button className="btn tiny" type="button" onClick={onClose}>Đóng</button></div>
-        <p>Cột trái là danh sách cảnh. Bấm một dòng để xem lời thoại và prompt. Ảnh minh họa để dành cho Google Flow, app không tạo ảnh.</p>
+        <p>Danh sách cảnh ở bên trái. Lời thoại và prompt xếp cùng một cột. Ảnh chỉ hiện khi cảnh có ảnh riêng, tỷ lệ 16:9.</p>
         <p>Mô phỏng không gọi API. Chạy thật cần khóa Gemini trong Cài đặt. Xuất nằm ở nút Xuất trên thanh trên.</p>
       </article>
     </div>
   );
 }
 
-function HomeIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11 12 4l8 7v9H4z" /></svg>;
-}
-const CROPS = ["center", "20% center", "80% center", "center 30%"];
-
-function PlayIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7v10l8-5z" fill="currentColor" stroke="none" /></svg>;
-}
-function DownloadIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10M8 10l4 4 4-4M6 19h12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>;
-}
-function ThemeIcon({ dark }: { dark: boolean }) {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r={dark ? 4 : 5} /><path d="M12 3v2M12 19v2M3 12h2M19 12h2" /></svg>;
-}
-function GearIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2" /></svg>;
-}
-function ListIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h10" /></svg>;
-}
-function FolderIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2 2h9v8.5h-17z" /></svg>;
-}
-function ChartIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V10M12 19V5M19 19v-7" /></svg>;
-}
-function BellIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16h12l-1.2-2.2V10a4.8 4.8 0 1 0-9.6 0v3.8zM10 18a2 2 0 0 0 4 0" /></svg>;
-}

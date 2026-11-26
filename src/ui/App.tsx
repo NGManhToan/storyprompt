@@ -49,6 +49,9 @@ export function App() {
             <button className="icon-btn" type="button" onClick={() => studio.setTheme(studio.theme === "dark" ? "light" : "dark")} aria-label={studio.theme === "dark" ? "Chuyển giao diện sáng" : "Chuyển giao diện tối"}>
               <ThemeIcon dark={studio.theme === "dark"} />
             </button>
+            <button className="btn" type="button" onClick={() => studio.setGuideOpen(true)}>
+              Hướng dẫn
+            </button>
             <button className="btn" type="button" onClick={() => studio.setSettingsOpen(true)}>
               Cài đặt
             </button>
@@ -74,7 +77,7 @@ export function App() {
             >
               <input
                 type="file"
-                accept=".srt,text/plain"
+                accept=".srt,.txt,text/plain"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
                   if (file) void studio.onFile(file);
@@ -86,6 +89,66 @@ export function App() {
             <button className="btn ghost wide" type="button" onClick={() => void studio.loadSample()}>
               Tải file mẫu 20 cảnh
             </button>
+            {studio.scenes.length ? (
+              <div className="cut-controls">
+                <div className="filters">
+                  {(
+                    [
+                      ["headings", "Theo cảnh"],
+                      ["fixed", `${studio.duration}s`],
+                      ["sense", "Cụm nghĩa"],
+                    ] as const
+                  ).map(([mode, text]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={studio.chunkMode === mode ? "pill on" : "pill"}
+                      onClick={() => studio.recut(mode, studio.duration)}
+                    >
+                      {text}
+                    </button>
+                  ))}
+                </div>
+                <label>
+                  Nhịp cảnh
+                  <select
+                    value={studio.duration}
+                    onChange={(event) => studio.recut(studio.chunkMode === "headings" ? "fixed" : studio.chunkMode, Number(event.target.value))}
+                  >
+                    {[4, 6, 8, 10, 12].map((seconds) => (
+                      <option key={seconds} value={seconds}>
+                        {seconds} giây
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            ) : null}
+            <label>
+              Kịch bản gốc
+              <textarea
+                rows={4}
+                value={studio.masterScript}
+                placeholder="Dán kịch bản đầy đủ nếu có. Mỗi lô sẽ nhận bản này để giữ không gian."
+                onChange={(event) => studio.setMasterScript(event.target.value)}
+              />
+            </label>
+            <label>
+              Chủ đề
+              <input
+                value={studio.settings.topic}
+                placeholder="Ví dụ: video essay buổi sáng"
+                onChange={(event) => studio.setSettings({ ...studio.settings, topic: event.target.value })}
+              />
+            </label>
+            <label>
+              Tên người kể
+              <input
+                value={studio.settings.protagonist}
+                placeholder="Để trống nếu không có người kể"
+                onChange={(event) => studio.setSettings({ ...studio.settings, protagonist: event.target.value })}
+              />
+            </label>
             {studio.warnings.length ? (
               <ul className="notes">
                 {studio.warnings.map((warning) => (
@@ -228,6 +291,7 @@ export function App() {
                           index={index}
                           source={scene.source}
                           title={scene.title}
+                          timeRange={scene.timeRange}
                           row={row}
                           editing={studio.editing === scene.sceneId}
                           wrapped={wrapped}
@@ -288,10 +352,17 @@ export function App() {
             <button className="btn" type="button" disabled={!usable} onClick={() => studio.download("flow")}>
               Gói Flow
             </button>
+            <button className="btn" type="button" disabled={!usable} onClick={() => studio.download("numbered")}>
+              TXT số
+            </button>
+            <button className="btn" type="button" disabled={!usable} onClick={() => studio.download("csv")}>
+              CSV
+            </button>
           </div>
         ) : null}
       </div>
 
+      {studio.guideOpen ? <Guide onClose={() => studio.setGuideOpen(false)} /> : null}
       {studio.settingsOpen ? <SettingsDrawer studio={studio} onClose={() => studio.setSettingsOpen(false)} /> : null}
       {studio.toast ? <div className="toast">{studio.toast}</div> : null}
     </>
@@ -370,6 +441,7 @@ function SceneRow({
   index,
   source,
   title,
+  timeRange,
   row,
   editing,
   wrapped,
@@ -383,6 +455,7 @@ function SceneRow({
   index: number;
   source: string;
   title: string;
+  timeRange?: string;
   row?: SceneResult;
   editing: boolean;
   wrapped: boolean;
@@ -413,7 +486,7 @@ function SceneRow({
     <article className={`scene ${row?.status ?? "pending"}`} style={{ ["--i" as string]: String(Math.min(index, 12)) }} role="row">
       <div>
         <b>{row?.sceneId}</b>
-        <small>{row?.title || title}</small>
+        <small>{timeRange || row?.title || title}</small>
       </div>
       <p className="source">{source}</p>
       <div>
@@ -442,6 +515,12 @@ function SceneRow({
         ) : (
           <>
             <p className={shown ? "prompt" : "prompt empty"}>{shown || "Chưa có prompt."}</p>
+            {row?.cameraAngle ? (
+              <span className="meta">
+                {row.shotSequence ? `${row.shotSequence} · ` : ""}
+                {row.cameraAngle}
+              </span>
+            ) : null}
             {row?.prompt ? <span className="meta">{countWords(row.prompt)} từ gốc</span> : null}
             {row?.rejections.length ? (
               <ul className="reasons">
@@ -571,6 +650,10 @@ function SettingsDrawer({ studio, onClose }: { studio: ReturnType<typeof useStud
           <input type="checkbox" checked={settings.directBrowser} onChange={(event) => set({ ...settings, directBrowser: event.target.checked })} />
           <span>Gọi Gemini trực tiếp từ trình duyệt</span>
         </label>
+        <label className="switch">
+          <input type="checkbox" checked={settings.fullScript !== false} onChange={(event) => set({ ...settings, fullScript: event.target.checked })} />
+          <span>Gửi toàn bộ kịch bản trong mỗi lô</span>
+        </label>
         <label>
           Gemini API key
           <input type="password" value={settings.geminiKey} autoComplete="off" onChange={(event) => set({ ...settings, geminiKey: event.target.value })} />
@@ -648,6 +731,37 @@ function SettingsDrawer({ studio, onClose }: { studio: ReturnType<typeof useStud
           <input value={settings.extraNames} onChange={(event) => set({ ...settings, extraNames: event.target.value })} />
         </label>
       </aside>
+    </div>
+  );
+}
+
+function Guide({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="scrim center" onClick={onClose} role="presentation">
+      <article className="guide" role="dialog" aria-labelledby="guide-title" onClick={(event) => event.stopPropagation()}>
+        <div className="row-between">
+          <h2 id="guide-title">Cách cắt cảnh và viết prompt</h2>
+          <button className="btn tiny" type="button" onClick={onClose}>
+            Đóng
+          </button>
+        </div>
+        <section>
+          <h3>1. Nhịp 8 giây hoặc theo tiêu đề cảnh</h3>
+          <p>File có dòng CẢNH / INT / EXT thì giữ nguyên từng cảnh. Phụ đề thoại liên tục thì cắt cố định 8 giây (00:00–00:08, 00:08–00:16) hoặc theo cụm nghĩa, dừng ở dấu câu và khoảng lặng.</p>
+        </section>
+        <section>
+          <h3>2. Tên khóa, không tả ngoại hình</h3>
+          <p>Tên trong danh sách chỉ được gọi bằng tên. Ảnh tham chiếu của Flow giữ mặt, da, tóc và quần áo. Prompt không gắn ký tự đặc biệt trước tên và không ghi mã màu.</p>
+        </section>
+        <section>
+          <h3>3. Đổi góc, cắt khi lời kể rời chỗ</h3>
+          <p>Một không gian được khoảng ba đến bốn góc trước khi đổi chỗ: POV, chi tiết, trung cảnh, toàn cảnh. Nếu câu phụ đề kể một người đang làm việc ở nơi khác, hình cắt sang người đó. Tên chỉ được nhắc mà không có việc để vẽ thì không vào khung.</p>
+        </section>
+        <section>
+          <h3>4. Kịch bản gốc và hậu kiểm</h3>
+          <p>Mỗi lô nhận toàn bộ kịch bản để giữ không gian, còn cảnh kề bên bị đánh dấu chỉ đọc. Sau khi viết, hệ thống loại câu cụt, sai tiếng, chữ trên hình, trùng cảnh và diễn viên không có mặt, rồi viết lại từng cảnh.</p>
+        </section>
+      </article>
     </div>
   );
 }

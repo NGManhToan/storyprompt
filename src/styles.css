@@ -126,6 +126,8 @@ p, h1, h2, h3 { margin: 0; }
 }
 .side, .main { padding: 18px; }
 .side { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 12px; }
+.side label, .cut-controls label { display: grid; gap: 6px; font-size: 13px; color: var(--ux-ink-2); }
+.side label.switch, .drawer label.switch { display: flex; align-items: center; grid-template-columns: none; }
 
 .eyebrow {
   font-size: 12px;
@@ -383,6 +385,20 @@ textarea { resize: vertical; }
   display: grid;
   justify-content: end;
 }
+.scrim.center { display: flex; justify-content: center; align-items: center; padding: 16px; }
+.guide {
+  width: min(640px, 100%);
+  max-height: min(86vh, 760px);
+  overflow: auto;
+  padding: 20px;
+  border-radius: var(--g-r);
+  background: var(--ux-surface);
+  box-shadow: 0 30px 80px var(--ux-shadow);
+  display: grid;
+  gap: 14px;
+}
+.guide h3 { font-size: 15px; letter-spacing: -0.03em; }
+.guide p { color: var(--ux-ink-2); font-size: 14px; line-height: 1.5; }
 .drawer {
   width: min(440px, 100vw);
   height: 100%;

@@ -29,6 +29,9 @@ export type Checkpoint = {
   results: SceneResult[];
   logs: RequestLog[];
   report?: RunReport;
+  masterScript?: string;
+  topic?: string;
+  protagonist?: string;
 };
 
 export type ProgressEvent =
@@ -49,6 +52,9 @@ export type PipelineInput = {
   onlySceneIds?: string[];
   fileName?: string;
   projectId?: string;
+  masterScript?: string;
+  topic?: string;
+  protagonist?: string;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   signal?: AbortSignal;
@@ -341,12 +347,20 @@ export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
         type: "status",
         label: `Đang viết cảnh ${batch[0].sceneId}–${batch[batch.length - 1].sceneId} · lần ${attempt}`,
       });
+      const masterScript =
+        input.settings.fullScript === false
+          ? ""
+          : input.masterScript?.trim() ||
+            scenes.map((scene) => `[${scene.sceneId}] ${scene.title}\n${scene.source}`).join("\n\n");
       const request = buildSceneRequest({
         tasks,
         knownNames,
         bible,
         maxOutputTokens: input.settings.maxOutputTokens,
-        temperature: attempt === 1 ? input.settings.temperature ?? 0.4 : 0.2,
+        temperature: attempt === 1 ? input.settings.temperature ?? 0.7 : 0.2,
+        masterScript,
+        topic: input.topic || input.settings.topic,
+        protagonist: input.protagonist || input.settings.protagonist,
       });
       let response: GenerateResponse;
       let latencyMs = 0;
@@ -462,6 +476,9 @@ export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
             prompt: draft?.prompt || "",
             visibleCast: draft?.visible_cast || [],
             sourceAnchor: draft?.source_anchor || "",
+            cameraAngle: draft?.camera_angle || previous.cameraAngle,
+            shotSequence: draft?.shot_sequence || previous.shotSequence,
+            visualAction: draft?.visual_action || previous.visualAction,
             rejections,
             model: response.model,
             lane: response.lane,

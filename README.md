@@ -30,7 +30,20 @@ Khóa tùy chọn trong `.env` (xem `.env.example`) hoặc dán trong **Cài đ�
 
 Story bible (địa điểm và ánh sáng ổn định) nằm sau công tắc. Tắt mặc định vì nó đổi cấu trúc prompt.
 
-Ngoại hình không được mô tả trong prompt. Ảnh tham chiếu của Flow giữ mặt và trang phục. Tiền tố / hậu tố do code gắn thêm, không phải model.
+Ngoại hình không được mô tả trong prompt. Ảnh tham chiếu của Flow giữ mặt và trang phục. Hậu tố webtoon do code gắn thêm, không phải model.
+
+## Phần lấy từ app AI Studio
+
+App gốc cắt phụ đề thành cảnh khoảng 8 giây, gửi cả kịch bản mỗi lô, và viết prompt theo luật webtoon: đổi góc trong một không gian, cắt sang người đang được kể nếu câu đó mô tả việc của họ, không tả ngoại hình. StoryPrompt Web giữ các luật đó.
+
+- Cắt **theo tiêu đề cảnh** khi file có `CẢNH` / `INT` / `EXT`. Nếu chỉ là phụ đề thoại: **cố định 4–12 giây** (mặc định 8) hoặc **cụm nghĩa**. TXT cắt theo dòng hoặc theo câu.
+- Ô kịch bản gốc, chủ đề, tên người kể. Bật mặc định «Gửi toàn bộ kịch bản trong mỗi lô» (cắt ở 20.000 ký tự nếu quá dài).
+- Lô mặc định 4. Nhiệt độ lượt đầu 0.7, lần viết lại 0.2. Model Gemini vẫn là `gemini-3.1-flash-lite`, rồi `gemini-3.8-flash`, rồi `gemini-flash-latest` khi model không tồn tại.
+- Groq mặc định `qwen/qwen3.8-27b`, cùng họ model với làn chất lượng trong kế hoạch. Cloudflare vẫn nhập model tay.
+- Mỗi cảnh có thêm góc máy, thứ tự shot và hành động ngắn. Xuất thêm `TXT số` (`1_prompt`) và CSV, bên cạnh gói Flow.
+- Quá tải 503 không tự nhảy sang model khác. 429 chờ đúng hạn mức của model đang chạy.
+
+Không mang sang: tên cứng trong prompt mẫu, luật gắn `@` và mã màu da cho bàn tay, nút tạo ảnh xem thử (model ảnh không có free tier ngoài AI Studio; ảnh vẫn là việc của Flow), và nhánh OpenAI trả phí.
 
 ## Hạn mức
 
@@ -41,7 +54,7 @@ Mặc định thận trọng, sửa trong Cài đặt cho đúng hạn mức kh�
 | RPM | 15 |
 | TPM | 250.000 |
 | RPD | 500 |
-| Lô | 6 |
+| Lô | 4 |
 | Luồng | 4 |
 | Viết lại | 3 lần, từng cảnh một |
 | maxOutputTokens | 8192 |

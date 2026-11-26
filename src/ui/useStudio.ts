@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { extractNames, inferPresence, splitExtraNames } from "../core/cast.js";
+import { buildScenes, type ChunkMode } from "../core/chunk.js";
 import { FatalRunError } from "../core/errors.js";
-import { toCopyText, toFlowHandoff } from "../core/export.js";
+import { toCopyText, toCsv, toFlowHandoff, toNumberedText } from "../core/export.js";
 import type { Checkpoint } from "../core/pipeline.js";
 import { runPipeline } from "../core/pipeline.js";
 import { createAbortableSleep, createScheduler, utcDay } from "../core/scheduler.js";
@@ -43,6 +44,12 @@ export function useStudio() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [filter, setFilter] = useState<"all" | "accepted" | "attention">("all");
   const [editing, setEditing] = useState<string | null>(null);
+  const [rawText, setRawText] = useState("");
+  const [fileKind, setFileKind] = useState<"srt" | "txt">("srt");
+  const [chunkMode, setChunkMode] = useState<ChunkMode>("headings");
+  const [duration, setDuration] = useState(8);
+  const [masterScript, setMasterScript] = useState("");
+  const [guideOpen, setGuideOpen] = useState(false);
   const [usage, setUsage] = useState(() => loadUsage());
   const abortRef = useRef<AbortController | null>(null);
   const [lastMode, setLastMode] = useState<"mock" | "live">("mock");
@@ -85,17 +92,25 @@ export function useStudio() {
     return merged;
   }, [names, settings.extraNames]);
 
-  async function ingest(name: string, text: string) {
-    const parsed = parseSrt(text);
+  function applyParsed(name: string, text: string, mode: ChunkMode, seconds: number, kind: "srt" | "txt") {
+    const parsed = buildScenes(text, {
+      mode: kind === "txt" ? "fixed" : mode,
+      duration: seconds,
+      kind,
+      txtMode: mode === "sense" ? "by_sentences" : "by_line",
+    });
     if (!parsed.scenes.length) {
-      setError("Không tách được cảnh nào. Kiểm tra lại file .srt.");
+      setError(kind === "txt" ? "File TXT không có dòng chữ." : "Không tách được cảnh nào. Kiểm tra lại file.");
       setPhase("error");
       return;
     }
-    const id = projectId(name, text);
     const detected = extractNames(parsed.scenes.map((scene) => scene.source).join("\n"), splitExtraNames(settings.extraNames));
     setFileName(name);
-    setProject(id);
+    setProject(projectId(name, text));
+    setRawText(text);
+    setFileKind(kind);
+    setChunkMode(kind === "txt" ? mode : mode);
+    setDuration(seconds);
     setWarnings(parsed.warnings);
     setScenes(parsed.scenes);
     setNames(detected);
@@ -105,8 +120,15 @@ export function useStudio() {
     setBible(null);
     setError("");
     setPhase("ready");
-    setLabel(`${parsed.scenes.length} cảnh đã đọc`);
-    const saved = await loadCheckpoint(id);
+    setLabel(`${parsed.scenes.length} cảnh đã cắt`);
+  }
+
+  async function ingest(name: string, text: string) {
+    const kind: "srt" | "txt" = /\.txt$/i.test(name) || !text.includes("-->") ? "txt" : "srt";
+    const hasHeadings = kind === "srt" && parseSrt(text).scenes.some((scene) => scene.heading);
+    const mode: ChunkMode = kind === "txt" ? "fixed" : hasHeadings ? "headings" : "fixed";
+    applyParsed(name, text, mode, duration, kind);
+    const saved = await loadCheckpoint(projectId(name, text));
     const usable = saved?.results.some((row) => row.status === "accepted" || row.status === "edited" || row.attempts > 0);
     setResumeOffer(usable ? saved : null);
   }
@@ -118,6 +140,9 @@ export function useStudio() {
     setLogs(saved.logs);
     setBible(saved.bible ?? null);
     setReport(saved.report ?? null);
+    if (saved.masterScript) setMasterScript(saved.masterScript);
+    if (saved.topic) setSettings((current) => ({ ...current, topic: saved.topic || current.topic }));
+    if (saved.protagonist) setSettings((current) => ({ ...current, protagonist: saved.protagonist || current.protagonist }));
     setPhase(saved.report ? "done" : "ready");
     setLabel("Đã mở bản lưu");
     setResumeOffer(null);
@@ -191,6 +216,9 @@ export function useStudio() {
         onlySceneIds: scope?.only,
         fileName,
         projectId: project,
+        masterScript,
+        topic: settings.topic,
+        protagonist: settings.protagonist,
         signal: controller.signal,
         sleep,
         onProgress: (event) => {
@@ -205,7 +233,14 @@ export function useStudio() {
           }
           if (event.type === "log") setLogs((current) => [...current, event.log]);
           if (event.type === "bible") setBible(event.bible);
-          if (event.type === "checkpoint") void saveCheckpoint(event.checkpoint);
+          if (event.type === "checkpoint") {
+            void saveCheckpoint({
+              ...event.checkpoint,
+              masterScript,
+              topic: settings.topic,
+              protagonist: settings.protagonist,
+            });
+          }
         },
       });
       setResults(output.results);
@@ -221,7 +256,12 @@ export function useStudio() {
         setLabel(output.report.cancelled ? "Đã dừng. Bản lưu giữ phần đã xong." : "Xong lượt chạy");
       }
     } catch (caught) {
-      const message = caught instanceof FatalRunError || caught instanceof Error ? caught.message : "Lượt chạy dừng.";
+      const raw = caught instanceof FatalRunError || caught instanceof Error ? caught.message : "Lượt chạy dừng.";
+      const message = /503|UNAVAILABLE|high demand/i.test(raw)
+        ? "Mô hình đang quá tải (503). Thử lại sau vài giây. Quá tải không tự đổi model, để chất lượng không bị trượt."
+        : /429|RESOURCE_EXHAUSTED|trần request/i.test(raw)
+          ? "Đã chạm hạn mức. Đợi rồi bấm chạy tiếp. Phần đã đạt vẫn nằm trong bản lưu."
+          : raw;
       if (controller.signal.aborted) {
         setPhase("done");
         setLabel("Đã dừng");
@@ -314,18 +354,26 @@ export function useStudio() {
     }
   }
 
-  function download(kind: "json" | "txt" | "flow") {
-    const stamp = fileName.replace(/\.srt$/i, "") || "storyprompt";
+  function download(kind: "json" | "txt" | "flow" | "numbered" | "csv") {
+    const stamp = fileName.replace(/\.(srt|txt)$/i, "") || "storyprompt";
     let filename = `${stamp}.txt`;
     let body = "";
     if (kind === "txt") body = toCopyText(scenes, results, settings.prefix, settings.footer);
+    if (kind === "numbered") {
+      filename = `${stamp}.numbered.txt`;
+      body = toNumberedText(scenes, results, settings.prefix, settings.footer);
+    }
+    if (kind === "csv") {
+      filename = `${stamp}.csv`;
+      body = toCsv(scenes, results, settings.prefix, settings.footer);
+    }
     if (kind === "flow") {
       filename = `${stamp}.flow.json`;
       body = JSON.stringify(toFlowHandoff(scenes, results, settings.prefix, settings.footer), null, 2);
     }
     if (kind === "json") {
       filename = `${stamp}.json`;
-      body = JSON.stringify({ fileName, bible, names: knownNames, scenes: scenes.map((scene) => ({ ...scene, result: results.find((row) => row.sceneId === scene.sceneId) })), report, logs }, null, 2);
+      body = JSON.stringify({ fileName, bible, names: knownNames, masterScript, scenes: scenes.map((scene) => ({ ...scene, result: results.find((row) => row.sceneId === scene.sceneId) })), report, logs }, null, 2);
     }
     if (!body) {
       setToast("Chưa có nội dung để tải");
@@ -373,6 +421,19 @@ export function useStudio() {
     dayKey: utcDay(Date.now()),
     lastMode,
     doneCount,
+    rawText,
+    fileKind,
+    chunkMode,
+    duration,
+    masterScript,
+    setMasterScript,
+    guideOpen,
+    setGuideOpen,
+    recut: (mode: ChunkMode, seconds = duration) => {
+      if (!rawText || !fileName) return;
+      applyParsed(fileName, rawText, mode, seconds, fileKind);
+      setToast(`Đã cắt lại: ${mode === "headings" ? "theo tiêu đề cảnh" : mode === "sense" ? "cụm nghĩa" : `${seconds}s`}`);
+    },
     onFile,
     loadSample,
     removeName,

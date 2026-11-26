@@ -25,11 +25,11 @@ export const defaultSettings: Settings = {
   geminiModel: "gemini-3.1-flash-lite",
   geminiFallbacks: "gemini-3.8-flash, gemini-flash-latest",
   groqKey: "",
-  groqModel: "llama-3.3-70b-versatile",
+  groqModel: "qwen/qwen3.8-27b",
   cfAccount: "",
   cfToken: "",
   cfModel: "@cf/meta/llama-3.1-8b-instruct",
-  batchSize: 6,
+  batchSize: 4,
   concurrency: 4,
   rpm: 15,
   tpm: 250_000,
@@ -37,13 +37,16 @@ export const defaultSettings: Settings = {
   maxAttempts: 3,
   maxOutputTokens: 8192,
   bible: false,
-  temperature: 0.4,
-  prefix: "Cinematic 16:9 still,",
-  footer: "No rendered text. Character appearance comes only from the reference images.",
+  temperature: 0.7,
+  fullScript: true,
+  topic: "",
+  protagonist: "",
+  prefix: "",
+  footer: "modern 2D webtoon comic style, crisp ink line art, cel-shaded, warm daylight, clean frame, no text, 16:9",
   extraNames: "",
 };
 
-const SETTINGS_KEY = "storyprompt.settings.v1";
+const SETTINGS_KEY = "storyprompt.settings.v2";
 const THEME_KEY = "storyprompt.theme";
 const USAGE_KEY = "storyprompt.usage.v1";
 

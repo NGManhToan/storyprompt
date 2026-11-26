@@ -64,6 +64,8 @@ export function draftFromTask(task: SceneTask, knownNames: string[]) {
         : `${present.slice(0, -1).join(", ")} and ${present[present.length - 1]}`;
   const body = who ? `${who} ${motion}` : `The quiet room showing ${motion}`;
   const prompt = fit(`${body}, medium shot at eye level with shallow focus and a practical lamp`);
+  const angleCycle = ["First-person POV", "Detail close-up", "Medium shot", "Wide shot"];
+  const angle = angleCycle[(Math.max(number, 1) - 1) % angleCycle.length];
   return {
     scene_id: task.sceneId,
     title: `Scene ${task.sceneId}`,
@@ -71,6 +73,9 @@ export function draftFromTask(task: SceneTask, knownNames: string[]) {
     prompt,
     visible_cast: present,
     source_anchor: pickAnchor(task.source),
+    camera_angle: angle,
+    shot_sequence: `Shot ${((Math.max(number, 1) - 1) % 4) + 1}/4`,
+    visual_action: motion.split(" ").slice(0, 6).join(" "),
   };
 }
 

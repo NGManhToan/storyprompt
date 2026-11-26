@@ -46,6 +46,9 @@ export type Scene = {
   start: string;
   end: string;
   cueIndexes: number[];
+  timeRange?: string;
+  cutReason?: string;
+  durationSeconds?: number;
 };
 
 export type ParseResult = {
@@ -61,6 +64,9 @@ export type SceneDraft = {
   prompt: string;
   visible_cast: string[];
   source_anchor: string;
+  camera_angle?: string;
+  shot_sequence?: string;
+  visual_action?: string;
 };
 
 export type StoryBible = {
@@ -120,6 +126,9 @@ export type SceneResult = {
   visibleCast: string[];
   sourceAnchor: string;
   rejections: Rejection[];
+  cameraAngle?: string;
+  shotSequence?: string;
+  visualAction?: string;
   model?: string;
   lane?: ProviderLane;
 };
@@ -173,6 +182,9 @@ export type RunSettings = {
   prefix: string;
   footer: string;
   temperature?: number;
+  fullScript?: boolean;
+  topic?: string;
+  protagonist?: string;
 };
 
 export function emptyResult(scene: Scene): SceneResult {

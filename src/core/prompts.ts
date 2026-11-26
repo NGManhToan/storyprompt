@@ -16,8 +16,21 @@ export const SCENE_RESPONSE_SCHEMA: Record<string, unknown> = {
           prompt: { type: "string" },
           visible_cast: { type: "array", items: { type: "string" } },
           source_anchor: { type: "string" },
+          camera_angle: { type: "string" },
+          shot_sequence: { type: "string" },
+          visual_action: { type: "string" },
         },
-        required: ["scene_id", "title", "environment", "prompt", "visible_cast", "source_anchor"],
+        required: [
+          "scene_id",
+          "title",
+          "environment",
+          "prompt",
+          "visible_cast",
+          "source_anchor",
+          "camera_angle",
+          "shot_sequence",
+          "visual_action",
+        ],
       },
     },
   },
@@ -56,19 +69,43 @@ export const BIBLE_RESPONSE_SCHEMA: Record<string, unknown> = {
   required: ["characters", "locations"],
 };
 
-export const SYSTEM_SCENES = `You are a storyboard artist writing still-image prompts for Google Flow.
+export const AESTHETIC_FOOTER =
+  "modern 2D webtoon comic style, crisp ink line art, cel-shaded, warm daylight, clean frame, no text, 16:9";
+
+export const SYSTEM_SCENES = `You are an expert cinematic storyboard artist writing still-image prompts for Google Flow, in a long-form 2D minimalist graphic-novel video essay.
 Return JSON only, matching the schema. No markdown.
 Write one object for every requested scene_id. Do not skip an id. Do not invent ids.
-prompt: one English sentence of 28 to 42 words. Include a concrete physical action happening now, the place, the light, and the camera. End with a period.
-Do not describe clothing, face, age, hair, body, skin, or colors of people. Reference images carry appearance. Use character names only.
-Do not write dialogue, quotations, subtitles, captions, signs with readable words, watermarks, or title cards.
-Do not use @tags or hex color codes.
-visible_cast: only people whose bodies are inside the frame, doing the action. Exclude anyone who is only spoken about. Exclude voice-over and off-screen names.
-environment: a short English location name.
-title: a short English scene title.
-source_anchor: an exact short quote copied from THIS scene's source that justifies the action. Never quote a READ-ONLY neighbor.
-Neighbor blocks are continuity only. Never borrow their actions, props, or blocking.
-Each prompt must be visually distinct from the others in this batch.
+
+CROSS-REFERENCE:
+MASTER_SCRIPT is the spatial anchor for the whole story. Find where each scene sits in that script and keep the current physical location until the story moves or the narration requires a cutaway.
+Neighbor blocks are read-only. Never borrow their actions, props, or blocking.
+
+CUTAWAY:
+When this scene's own source describes a named character doing something or living through an event, show that character. Do not leave the protagonist in frame during that line.
+When a name is only mentioned and the line gives them no action to depict, they stay out of frame. Off-screen and voice-over speakers stay out of frame.
+
+VARIETY:
+Never make the same prop the subject of two consecutive shots.
+If several scenes stay in one room, rotate the camera: a point-of-view interaction with an object, a wide shot of the room and the daylight, a detail close-up, then a medium shot. Give one environment three or four angles before changing location.
+Change location only when the script moves or a cutaway is required.
+
+LOOK:
+Modern 2D webtoon, clean ink line, cel-shaded, warm daylight, calm. Do not write the style footer yourself. Code appends it.
+prompt: one English sentence of 28 to 42 words. Concrete action happening now, the place, the light, and the camera. End with a period.
+No dialogue, quotations, subtitles, captions, readable signs, or title cards.
+
+LOCKED NAMES:
+Use the roster names only. Never describe skin, face, hair, age, body, clothes, or colors of people. Reference images carry appearance.
+Do not attach an at-sign to a name. Do not write hex color codes. For a hand shot, name whose hand it is and the action, with no color.
+If a protagonist name is configured, use that name for the narrator's body. Do not replace them with "a hand" or "a person".
+
+visible_cast: only bodies inside the frame.
+environment: short English location.
+title: short English scene title.
+camera_angle: framing, such as medium shot, wide shot, point-of-view, or detail.
+shot_sequence: which angle this is inside the current location, such as Shot 2/4.
+visual_action: one short English clause of the action.
+source_anchor: an exact short quote from THIS scene's source. Never quote a read-only neighbor.
 If a previous draft was rejected, repair only the named faults.`;
 
 export function systemForScenes(bible: boolean): string {
@@ -126,16 +163,31 @@ function renderTask(task: SceneTask): string {
     .join("\n");
 }
 
+const MASTER_CAP = 20_000;
+
+export function clipMasterScript(text: string): { text: string; trimmed: boolean } {
+  const clean = text.trim();
+  if (clean.length <= MASTER_CAP) return { text: clean, trimmed: false };
+  return { text: `${clean.slice(0, MASTER_CAP)}\n[master script trimmed for this request]`, trimmed: true };
+}
+
 export function buildSceneRequest(args: {
   tasks: SceneTask[];
   knownNames: string[];
   bible?: StoryBible | null;
   maxOutputTokens: number;
   temperature: number;
+  masterScript?: string;
+  topic?: string;
+  protagonist?: string;
 }): GenerateRequest {
   const systemText = systemForScenes(Boolean(args.bible));
+  const master = args.masterScript?.trim() ? clipMasterScript(args.masterScript) : null;
   const promptText = [
+    args.topic?.trim() ? `VIDEO TOPIC: ${args.topic.trim()}` : "",
     `ROSTER (names only, no appearance): ${args.knownNames.join(", ") || "(discover from the sources)"}`,
+    args.protagonist?.trim() ? `PROTAGONIST NAME (locked token, no appearance): ${args.protagonist.trim()}` : "",
+    master ? `MASTER_SCRIPT (spatial anchor only. Do not depict actions from scenes you are not writing.):\n${master.text}` : "",
     bibleBlock(args.bible),
     "Write every scene marked WRITE. Skip nothing.",
     args.tasks.map(renderTask).join("\n\n"),
@@ -231,6 +283,9 @@ export function parseScenePayload(text: string): SceneDraft[] {
       prompt: String(record.prompt ?? "").trim(),
       visible_cast: asStringArray(record.visible_cast ?? record.visibleCast),
       source_anchor: String(record.source_anchor ?? record.sourceAnchor ?? "").trim(),
+      camera_angle: String(record.camera_angle ?? record.cameraAngle ?? "").trim(),
+      shot_sequence: String(record.shot_sequence ?? record.shotSequence ?? "").trim(),
+      visual_action: String(record.visual_action ?? record.visualAction ?? "").trim(),
     };
   });
 }

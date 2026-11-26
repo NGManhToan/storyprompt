@@ -113,7 +113,7 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-export async function saveCheckpoint(checkpoint: Checkpoint): Promise<void> {
+export async function saveCheckpoint(checkpoint: Checkpoint): Promise<boolean> {
   try {
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
@@ -123,8 +123,9 @@ export async function saveCheckpoint(checkpoint: Checkpoint): Promise<void> {
       tx.onerror = () => reject(tx.error);
     });
     db.close();
+    return true;
   } catch {
-    /* trình duyệt riêng tư vẫn chạy được trong bộ nhớ */
+    return false;
   }
 }
 

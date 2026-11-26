@@ -23,10 +23,10 @@ header{flex:none}
 .scenes{display:flex;flex-direction:column;min-height:0;height:100%;overflow:hidden}
 #list{max-height:none;flex:1;min-height:0}
 .workspace{min-height:0;overflow:auto}
-/* UI-010 UI-020: 8u tabs overflowed and were unreadably small. */
-.tabs{flex-wrap:wrap}
-.tabs button,.pill,.actions,.paging,.tag,.field small,.scene{font-size:max(12px,calc(12 * var(--u)))}
-.scene-head h1{font-size:max(20px,calc(20 * var(--u)))}
+/* UI-010: keep the reference one-row tabs; the wider column is what stops the overflow. */
+.tabs{flex-wrap:nowrap}
+.tabs button{font-size:calc(9 * var(--u));overflow:hidden;text-overflow:ellipsis}
+#list{padding-bottom:10px}
 /* UI-018 UI-008: the track grew with flex 1 and the 9px mark looked finished at 0%. */
 .progress{flex:0 1 auto}
 .track{flex:none;width:min(110px,14vw)}
@@ -35,8 +35,8 @@ button:disabled{opacity:.38;cursor:not-allowed;filter:grayscale(.55)}
 .photo-label{white-space:nowrap;z-index:1;max-width:70%;overflow:hidden}
 .photo button{z-index:1}
 .photo .remove-still{top:auto;bottom:8px;right:8px}
-.logo{display:grid;place-items:center;width:calc(28 * var(--u));height:calc(28 * var(--u));background:var(--green);color:#fff;border-radius:8px;font-size:calc(14 * var(--u))}
-.logo svg{fill:currentColor}
+.logo{background:none;width:auto;height:auto;color:var(--green);font-size:calc(30 * var(--u))}
+.logo svg{fill:currentColor;width:1em;height:1em}
 /* UI-012 UI-013: without a still, 1fr made the copy full-bleed. */
 .editor-grid.solo{grid-template-columns:minmax(0,68ch)}
 .editor-grid.solo .editors{grid-template-rows:auto auto}
@@ -50,3 +50,10 @@ button:disabled{opacity:.38;cursor:not-allowed;filter:grayscale(.55)}
 .drop{width:100%;border:1.5px dashed var(--green);border-radius:14px;padding:28px 16px;background:var(--field);cursor:pointer}
 .drop.over{background:var(--soft)}
 main.empty{grid-template-columns:calc(46 * var(--u)) minmax(0,1fr)}
+.editor-grid.solo .field{max-width:68ch}
+@media (max-height:700px){
+  .photo{height:148px;max-height:148px;aspect-ratio:auto}
+  .actions{margin-top:8px}
+  main{padding-bottom:18px}
+  .scene-head{margin-bottom:6px}
+}

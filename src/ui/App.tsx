@@ -164,19 +164,21 @@ export function App() {
     if (text === undefined || text === (selectedResult?.prompt ?? "")) return;
     setSaveState("unsaved");
     const timer = window.setTimeout(() => {
+      void (async () => {
       setSaveState("saving");
       try {
-        studio.saveEdit(selected.sceneId, {
+        const stored = await studio.saveEdit(selected.sceneId, {
           title: selected.cutReason || selected.title,
           environment: selectedResult?.environment || "",
           prompt: text,
           cast: selectedResult?.visibleCast.join(", ") || "",
         });
-        setSaveState("saved");
-        setSavedAt(Date.now());
+        setSaveState(stored ? "saved" : "failed");
+        if (stored) setSavedAt(Date.now());
       } catch {
         setSaveState("failed");
       }
+      })();
     }, 800);
     return () => window.clearTimeout(timer);
   }, [drafts, selected, selectedResult, studio]);
@@ -402,12 +404,7 @@ function SceneWorkspace({
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
-        try {
-          studio.saveEdit(sceneId, { title, environment: result?.environment || "", prompt, cast: result?.visibleCast.join(", ") || "" });
-          onSaved(true);
-        } catch {
-          onSaved(false);
-        }
+        void studio.saveEdit(sceneId, { title, environment: result?.environment || "", prompt, cast: result?.visibleCast.join(", ") || "" }).then((ok) => onSaved(Boolean(ok)), () => onSaved(false));
       }
     };
     window.addEventListener("keydown", onKey);
@@ -502,7 +499,7 @@ function SceneWorkspace({
             <option value="review">Cần kiểm tra</option>
           </select>
         </label>
-        <button className="primary" id="save" type="button" title="Lưu (Ctrl+S)" onClick={() => { try { studio.saveEdit(sceneId, { title, environment: result?.environment || "", prompt, cast: result?.visibleCast.join(", ") || "" }); onSaved(true); } catch { onSaved(false); } }}><Check /> Lưu (Ctrl + S)</button>
+        <button className="primary" id="save" type="button" title="Lưu (Ctrl+S)" onClick={() => { void studio.saveEdit(sceneId, { title, environment: result?.environment || "", prompt, cast: result?.visibleCast.join(", ") || "" }).then((ok) => onSaved(Boolean(ok)), () => onSaved(false)); }}><Check /> Lưu (Ctrl + S)</button>
       </div>
       {confirmClear ? (
         <dialog open>

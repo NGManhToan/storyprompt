@@ -278,10 +278,10 @@ export function useStudio() {
     abortRef.current?.abort();
   }
 
-  function saveEdit(sceneId: string, patch: { title: string; environment: string; prompt: string; cast: string }) {
+  async function saveEdit(sceneId: string, patch: { title: string; environment: string; prompt: string; cast: string }) {
     const scene = scenes.find((item) => item.sceneId === sceneId);
     const current = results.find((item) => item.sceneId === sceneId);
-    if (!scene || !current) return;
+    if (!scene || !current) return false;
     const visibleCast = splitExtraNames(patch.cast);
     const index = scenes.findIndex((item) => item.sceneId === sceneId);
     const neighbors = [scenes[index - 1], scenes[index + 1]].filter((item): item is Scene => Boolean(item));
@@ -326,8 +326,7 @@ export function useStudio() {
     const updated = results.map((row) => (row.sceneId === sceneId ? next : row));
     setResults(updated);
     setEditing(null);
-    setToast(verdict.ok ? "Đã lưu cảnh" : "Đã lưu, còn cảnh báo");
-    void saveCheckpoint({
+    const stored = await saveCheckpoint({
       id: project,
       fileName,
       savedAt: Date.now(),
@@ -338,6 +337,8 @@ export function useStudio() {
       logs,
       report: report ?? undefined,
     });
+    setToast(stored ? (verdict.ok ? "Đã lưu cảnh" : "Đã lưu, còn cảnh báo") : "Không lưu được bản nháp");
+    return stored;
   }
 
   async function copyAll() {

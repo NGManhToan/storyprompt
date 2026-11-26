@@ -47,7 +47,7 @@ export const defaultSettings: Settings = {
 };
 
 const SETTINGS_KEY = "storyprompt.settings.v2";
-const THEME_KEY = "storyprompt.theme";
+const THEME_KEY = "storyprompt.theme.v2";
 const USAGE_KEY = "storyprompt.usage.v1";
 
 export type DayUsage = { dayKey: string; count: number };
@@ -68,7 +68,7 @@ export function saveSettings(settings: Settings) {
 
 export function loadTheme(): "dark" | "light" {
   const stored = localStorage.getItem(THEME_KEY);
-  return stored === "light" ? "light" : "dark";
+  return stored === "dark" ? "dark" : "light";
 }
 
 export function saveTheme(theme: "dark" | "light") {

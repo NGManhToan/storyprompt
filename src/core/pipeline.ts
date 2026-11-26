@@ -1,0 +1,581 @@
+import { extractNames, inferPresence } from "./cast.js";
+import { FatalRunError, isAbortError, ProviderError } from "./errors.js";
+import { bibleDigest, buildBibleRequest, buildSceneRequest, parseBiblePayload, parseScenePayload } from "./prompts.js";
+import type { Scheduler } from "./scheduler.js";
+import type {
+  GenerateRequest,
+  GenerateResponse,
+  Provider,
+  Rejection,
+  RequestLog,
+  RunReport,
+  RunSettings,
+  Scene,
+  SceneDraft,
+  SceneResult,
+  SceneTask,
+  StoryBible,
+} from "./types.js";
+import { clamp, emptyResult } from "./types.js";
+import { canonSceneId, validateDraft, visualKey } from "./validators.js";
+
+export type Checkpoint = {
+  id: string;
+  fileName: string;
+  savedAt: number;
+  scenes: Scene[];
+  knownNames: string[];
+  bible?: StoryBible;
+  results: SceneResult[];
+  logs: RequestLog[];
+  report?: RunReport;
+};
+
+export type ProgressEvent =
+  | { type: "status"; label: string }
+  | { type: "scene"; result: SceneResult }
+  | { type: "log"; log: RequestLog }
+  | { type: "bible"; bible: StoryBible }
+  | { type: "checkpoint"; checkpoint: Checkpoint };
+
+export type PipelineInput = {
+  scenes: Scene[];
+  knownNames?: string[];
+  settings: RunSettings;
+  lanes: Provider[];
+  scheduler: Scheduler;
+  bible?: StoryBible | null;
+  prior?: SceneResult[];
+  onlySceneIds?: string[];
+  fileName?: string;
+  projectId?: string;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+  signal?: AbortSignal;
+  onProgress?: (event: ProgressEvent) => void;
+};
+
+export type RunOutput = {
+  results: SceneResult[];
+  logs: RequestLog[];
+  bible?: StoryBible;
+  report: RunReport;
+  knownNames: string[];
+};
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const groups: T[][] = [];
+  for (let index = 0; index < items.length; index += size) groups.push(items.slice(index, index + size));
+  return groups;
+}
+
+async function pool<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>) {
+  if (!items.length) return;
+  let cursor = 0;
+  const workers = Math.max(1, Math.min(concurrency, items.length));
+  async function loop() {
+    for (;;) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      await worker(items[index]);
+    }
+  }
+  await Promise.all(Array.from({ length: workers }, () => loop()));
+}
+
+function createLock() {
+  let tail = Promise.resolve();
+  return function lock<T>(fn: () => T | Promise<T>): Promise<T> {
+    const run = tail.then(fn, fn);
+    tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+}
+
+function neighborsOf(scenes: Scene[], scene: Scene): SceneTask["neighbors"] {
+  const index = scenes.findIndex((item) => item.sceneId === scene.sceneId);
+  return [scenes[index - 1], scenes[index + 1]].filter((item): item is Scene => Boolean(item)).map((item) => ({
+    sceneId: item.sceneId,
+    title: item.title,
+    source: item.source,
+  }));
+}
+
+async function callLanes(args: {
+  lanes: Provider[];
+  request: GenerateRequest;
+  scheduler: Scheduler;
+  sleep: (ms: number) => Promise<void>;
+  now: () => number;
+  signal?: AbortSignal;
+  attempt: number;
+  onLog: (log: RequestLog) => void;
+}): Promise<{ response: GenerateResponse; latencyMs: number }> {
+  const lanes = args.lanes.filter((lane) => lane.available);
+  if (!lanes.length) throw new FatalRunError("Chưa có lane nào sẵn sàng. Hãy nhập khóa API hoặc chạy mô phỏng.");
+  let last: unknown;
+  for (const lane of lanes) {
+    let backoff = 2_000;
+    for (let tryNo = 0; tryNo < 6; tryNo += 1) {
+      if (args.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      const lease = await args.scheduler.acquire(args.request.estimatedTokens);
+      const started = args.now();
+      try {
+        const response = await lane.generate(args.request, args.signal);
+        lease.reconcile(response.usage.totalTokens || args.request.estimatedTokens);
+        return { response, latencyMs: Math.max(0, args.now() - started) };
+      } catch (error) {
+        lease.reconcile(1);
+        last = error;
+        const latencyMs = Math.max(0, args.now() - started);
+        if (isAbortError(error)) throw error;
+        if (error instanceof ProviderError && (error.status === 401 || error.status === 403)) {
+          args.onLog({
+            id: crypto.randomUUID(),
+            at: args.now(),
+            lane: lane.lane,
+            model: lane.model,
+            kind: args.request.kind,
+            sceneIds: args.request.sceneIds,
+            attempt: args.attempt,
+            finishReason: "error",
+            promptTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+            latencyMs,
+            status: "error",
+            error: error.message,
+            rejections: [],
+          });
+          throw new FatalRunError(error.message);
+        }
+        if (error instanceof ProviderError && error.status === 429) {
+          const wait = error.retryAfterMs ?? backoff;
+          args.scheduler.penalize(wait);
+          args.onLog({
+            id: crypto.randomUUID(),
+            at: args.now(),
+            lane: lane.lane,
+            model: lane.model,
+            kind: args.request.kind,
+            sceneIds: args.request.sceneIds,
+            attempt: args.attempt,
+            finishReason: "rate_limit",
+            promptTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+            latencyMs,
+            status: "rate_limited",
+            error: `429, chờ ${wait}ms`,
+            rejections: [],
+          });
+          await args.sleep(wait);
+          backoff = Math.min(backoff * 2, 60_000);
+          continue;
+        }
+        if (error instanceof ProviderError && error.status >= 500 && tryNo < 2) {
+          await args.sleep(backoff);
+          backoff = Math.min(backoff * 2, 30_000);
+          continue;
+        }
+        break;
+      }
+    }
+  }
+  throw last instanceof Error ? last : new Error("Nhà cung cấp không trả lời.");
+}
+
+function rejectionLog(rows: { sceneId: string; rejections: Rejection[] }[]) {
+  return rows
+    .filter((row) => row.rejections.length)
+    .map((row) => ({ sceneId: row.sceneId, reasons: row.rejections.map((item) => item.code) }));
+}
+
+export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
+  const now = input.now ?? (() => Date.now());
+  const sleep = input.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const startedAt = now();
+  const scenes = input.scenes;
+  const knownNames = input.knownNames?.length
+    ? input.knownNames
+    : extractNames(scenes.map((scene) => scene.source).join("\n"));
+  const byId = new Map<string, SceneResult>();
+  for (const scene of scenes) byId.set(scene.sceneId, emptyResult(scene));
+  for (const prior of input.prior ?? []) {
+    if (!byId.has(prior.sceneId)) continue;
+    if (prior.status === "accepted" || prior.status === "edited" || prior.prompt || prior.attempts) {
+      byId.set(prior.sceneId, prior);
+    }
+  }
+  const only = input.onlySceneIds ? new Set(input.onlySceneIds) : null;
+  const logs: RequestLog[] = [];
+  let bible = input.bible ?? undefined;
+  let fatal: string | undefined;
+  let cancelled = false;
+  const batchSize = clamp(input.settings.batchSize, 4, 8);
+  const concurrency = clamp(input.settings.concurrency, 1, 6);
+  const maxAttempts = clamp(input.settings.maxAttempts, 1, 5);
+  const lock = createLock();
+
+  const resultsNow = () => scenes.map((scene) => byId.get(scene.sceneId)!);
+
+  const checkpoint = (): Checkpoint => ({
+    id: input.projectId ?? "project",
+    fileName: input.fileName ?? "",
+    savedAt: now(),
+    scenes,
+    knownNames,
+    bible,
+    results: resultsNow(),
+    logs,
+  });
+
+  const emitScene = (result: SceneResult) => {
+    byId.set(result.sceneId, result);
+    input.onProgress?.({ type: "scene", result });
+  };
+
+  const pushLog = (log: RequestLog) => {
+    logs.push(log);
+    input.onProgress?.({ type: "log", log });
+  };
+
+  const seenKeys = () => {
+    const map = new Map<string, string>();
+    for (const row of byId.values()) {
+      if ((row.status !== "accepted" && row.status !== "edited") || !row.prompt) continue;
+      const key = visualKey(row.environment, row.prompt);
+      if (key && !map.has(key)) map.set(key, row.sceneId);
+    }
+    return map;
+  };
+
+  const neighborPrompts = (task: SceneTask) => {
+    const ids = new Set(task.neighbors.map((neighbor) => neighbor.sceneId));
+    return [...byId.values()]
+      .filter((row) => ids.has(row.sceneId) && row.prompt && (row.status === "accepted" || row.status === "edited"))
+      .map((row) => ({ sceneId: row.sceneId, prompt: row.prompt }));
+  };
+
+  try {
+    if (input.settings.bible && !bible) {
+      input.onProgress?.({ type: "status", label: "Đang lập story bible" });
+      const request = buildBibleRequest({
+        digest: bibleDigest(scenes),
+        knownNames,
+        maxOutputTokens: Math.min(input.settings.maxOutputTokens, 4096),
+      });
+      const bibleCall = await callLanes({
+        lanes: input.lanes,
+        request,
+        scheduler: input.scheduler,
+        sleep,
+        now,
+        signal: input.signal,
+        attempt: 1,
+        onLog: pushLog,
+      });
+      pushLog({
+        id: crypto.randomUUID(),
+        at: now(),
+        lane: bibleCall.response.lane,
+        model: bibleCall.response.model,
+        kind: "bible",
+        sceneIds: [],
+        attempt: 1,
+        finishReason: bibleCall.response.finishReason,
+        promptTokens: bibleCall.response.usage.promptTokens,
+        outputTokens: bibleCall.response.usage.outputTokens,
+        totalTokens: bibleCall.response.usage.totalTokens,
+        latencyMs: bibleCall.latencyMs,
+        status: "ok",
+        rejections: [],
+      });
+      bible = parseBiblePayload(bibleCall.response.text);
+      input.onProgress?.({ type: "bible", bible });
+    }
+  } catch (error) {
+    if (isAbortError(error)) cancelled = true;
+    else fatal = error instanceof Error ? error.message : "Story bible thất bại.";
+  }
+
+  let attempt = 1;
+  while (!fatal && !cancelled && attempt <= maxAttempts) {
+    const queue = scenes.filter((scene) => {
+      if (only && !only.has(scene.sceneId)) return false;
+      const row = byId.get(scene.sceneId)!;
+      if (row.status === "accepted" || row.status === "edited") return false;
+      return row.attempts < maxAttempts;
+    });
+    if (!queue.length) break;
+    const size = attempt === 1 ? batchSize : 1;
+    await pool(chunk(queue, size), concurrency, async (batch) => {
+      if (fatal || cancelled || input.signal?.aborted) {
+        cancelled = cancelled || Boolean(input.signal?.aborted);
+        return;
+      }
+      const tasks: SceneTask[] = batch.map((scene) => {
+        const previous = byId.get(scene.sceneId)!;
+        return {
+          sceneId: scene.sceneId,
+          title: scene.title,
+          source: scene.source,
+          likelyPresent: inferPresence(scene.source, knownNames).present,
+          neighbors: neighborsOf(scenes, scene),
+          feedback: previous.rejections.length
+            ? previous.rejections.map((item) => `${item.code}: ${item.detail}`).join(" | ")
+            : undefined,
+        };
+      });
+      await lock(async () => {
+        for (const scene of batch) {
+          const previous = byId.get(scene.sceneId)!;
+          emitScene({ ...previous, status: "running" });
+        }
+      });
+      input.onProgress?.({
+        type: "status",
+        label: `Đang viết cảnh ${batch[0].sceneId}–${batch[batch.length - 1].sceneId} · lần ${attempt}`,
+      });
+      const request = buildSceneRequest({
+        tasks,
+        knownNames,
+        bible,
+        maxOutputTokens: input.settings.maxOutputTokens,
+        temperature: attempt === 1 ? input.settings.temperature ?? 0.4 : 0.2,
+      });
+      let response: GenerateResponse;
+      let latencyMs = 0;
+      try {
+        const called = await callLanes({
+          lanes: input.lanes,
+          request,
+          scheduler: input.scheduler,
+          sleep,
+          now,
+          signal: input.signal,
+          attempt,
+          onLog: pushLog,
+        });
+        response = called.response;
+        latencyMs = called.latencyMs;
+      } catch (error) {
+        if (isAbortError(error)) {
+          cancelled = true;
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Lỗi nhà cung cấp.";
+        if (error instanceof FatalRunError) fatal = message;
+        await lock(async () => {
+          const rejections: Rejection[] = [{ code: "providerError", detail: message }];
+          for (const scene of batch) {
+            const previous = byId.get(scene.sceneId)!;
+            emitScene({
+              ...previous,
+              status: "rejected",
+              attempts: previous.attempts + 1,
+              rejections,
+            });
+          }
+          const ids = batch.map((scene) => scene.sceneId).join();
+          const last = logs[logs.length - 1];
+          if (last && last.sceneIds.join() === ids && !last.rejections.length) {
+            last.rejections = rejectionLog(batch.map((scene) => ({ sceneId: scene.sceneId, rejections })));
+            last.status = fatal ? "error" : last.status;
+            last.error = last.error ?? message;
+          } else {
+            pushLog({
+              id: crypto.randomUUID(),
+              at: now(),
+              lane: input.lanes[0]?.lane ?? "mock",
+              model: input.lanes[0]?.model ?? "unknown",
+              kind: "scenes",
+              sceneIds: batch.map((scene) => scene.sceneId),
+              attempt,
+              finishReason: "error",
+              promptTokens: 0,
+              outputTokens: 0,
+              totalTokens: 0,
+              latencyMs: 0,
+              status: "error",
+              error: message,
+              rejections: rejectionLog(batch.map((scene) => ({ sceneId: scene.sceneId, rejections }))),
+            });
+          }
+        });
+        return;
+      }
+
+      await lock(async () => {
+        let drafts: SceneDraft[] = [];
+        let parseError = "";
+        try {
+          drafts = parseScenePayload(response.text);
+        } catch (error) {
+          parseError = error instanceof Error ? error.message : "JSON lỗi.";
+        }
+        const truncated = /MAX_TOKENS|LENGTH/i.test(response.finishReason);
+        const knownIds = tasks.map((task) => task.sceneId);
+        const buckets = new Map<string, SceneDraft[]>();
+        if (!parseError) {
+          for (const draft of drafts) {
+            const id = canonSceneId(draft.scene_id, knownIds);
+            if (!id) continue;
+            const list = buckets.get(id) ?? [];
+            list.push({ ...draft, scene_id: id });
+            buckets.set(id, list);
+          }
+        }
+        const batchRejections: { sceneId: string; rejections: Rejection[] }[] = [];
+        for (const task of tasks) {
+          const previous = byId.get(task.sceneId)!;
+          const attempts = previous.attempts + 1;
+          const rows = buckets.get(task.sceneId) ?? [];
+          let rejections: Rejection[] = [];
+          let draft: SceneDraft | undefined = rows[0];
+          if (parseError || !draft) {
+            rejections = [
+              {
+                code: truncated ? "truncated" : rows.length ? "duplicateSceneId" : "missing",
+                detail: parseError || (rows.length > 1 ? "Model trả trùng scene_id." : "Model bỏ sót cảnh này."),
+              },
+            ];
+            if (rows.length > 1) draft = undefined;
+          } else if (rows.length > 1) {
+            rejections = [{ code: "duplicateSceneId", detail: "Model trả hai kết quả cho cùng một cảnh." }];
+            draft = undefined;
+          } else {
+            const verdict = validateDraft(draft, task, knownNames, neighborPrompts(task), seenKeys());
+            rejections = verdict.rejections;
+          }
+          const accepted = Boolean(draft) && rejections.length === 0;
+          emitScene({
+            sceneId: task.sceneId,
+            status: accepted ? "accepted" : "rejected",
+            attempts,
+            title: draft?.title || previous.title,
+            environment: draft?.environment || "",
+            prompt: draft?.prompt || "",
+            visibleCast: draft?.visible_cast || [],
+            sourceAnchor: draft?.source_anchor || "",
+            rejections,
+            model: response.model,
+            lane: response.lane,
+          });
+          batchRejections.push({ sceneId: task.sceneId, rejections });
+        }
+        pushLog({
+          id: crypto.randomUUID(),
+          at: now(),
+          lane: response.lane,
+          model: response.model,
+          kind: "scenes",
+          sceneIds: knownIds,
+          attempt,
+          finishReason: response.finishReason,
+          promptTokens: response.usage.promptTokens,
+          outputTokens: response.usage.outputTokens,
+          totalTokens: response.usage.totalTokens,
+          latencyMs,
+          status: "ok",
+          rejections: rejectionLog(batchRejections),
+        });
+        input.onProgress?.({ type: "checkpoint", checkpoint: checkpoint() });
+      });
+    });
+    if (input.signal?.aborted) cancelled = true;
+    attempt += 1;
+  }
+
+  for (const scene of scenes) {
+    const row = byId.get(scene.sceneId)!;
+    if (cancelled || fatal) {
+      if (row.status === "running") emitScene({ ...row, status: "pending" });
+      continue;
+    }
+    if (row.status === "rejected" || row.status === "missing" || row.status === "running") {
+      emitScene({ ...row, status: "failed" });
+    }
+  }
+
+  const results = resultsNow();
+  const report = buildReport({
+    results,
+    logs,
+    startedAt,
+    finishedAt: now(),
+    bible: Boolean(input.settings.bible),
+    cancelled,
+    fatalError: fatal,
+  });
+  const done = checkpoint();
+  done.report = report;
+  input.onProgress?.({ type: "checkpoint", checkpoint: done });
+  return { results, logs, bible, report, knownNames };
+}
+
+export function buildReport(args: {
+  results: SceneResult[];
+  logs: RequestLog[];
+  startedAt: number;
+  finishedAt: number;
+  bible: boolean;
+  cancelled: boolean;
+  fatalError?: string;
+}): RunReport {
+  const sceneCount = args.results.length || 1;
+  const accepted = args.results.filter((row) => row.status === "accepted").length;
+  const edited = args.results.filter((row) => row.status === "edited").length;
+  const failed = args.results.filter((row) => row.status === "failed" || row.status === "rejected").length;
+  const missing = args.results.filter((row) => row.status === "missing" || row.status === "pending").length;
+  const rejectionsByReason: Record<string, number> = {};
+  for (const log of args.logs) {
+    for (const row of log.rejections) {
+      for (const reason of row.reasons) rejectionsByReason[reason] = (rejectionsByReason[reason] ?? 0) + 1;
+    }
+  }
+  const tokens = args.logs.reduce(
+    (sum, log) => ({
+      prompt: sum.prompt + log.promptTokens,
+      output: sum.output + log.outputTokens,
+      total: sum.total + log.totalTokens,
+    }),
+    { prompt: 0, output: 0, total: 0 },
+  );
+  const models: Record<string, number> = {};
+  const lanes: Record<string, number> = {};
+  for (const log of args.logs) {
+    if (log.status !== "ok") continue;
+    models[log.model] = (models[log.model] ?? 0) + 1;
+    lanes[log.lane] = (lanes[log.lane] ?? 0) + 1;
+  }
+  return {
+    startedAt: args.startedAt,
+    finishedAt: args.finishedAt,
+    wallTimeMs: Math.max(0, args.finishedAt - args.startedAt),
+    sceneCount: args.results.length,
+    accepted,
+    edited,
+    failed,
+    missing,
+    acceptedPct: args.results.length ? Math.round((accepted / sceneCount) * 1000) / 10 : 0,
+    usablePct: args.results.length ? Math.round(((accepted + edited) / sceneCount) * 1000) / 10 : 0,
+    rejectionsByReason,
+    tokens: {
+      prompt: Math.round(tokens.prompt),
+      output: Math.round(tokens.output),
+      total: Math.round(tokens.total),
+    },
+    requests: args.logs.length,
+    rejectionEvents: Object.values(rejectionsByReason).reduce((sum, count) => sum + count, 0),
+    models,
+    lanes,
+    bible: args.bible,
+    cancelled: args.cancelled,
+    fatalError: args.fatalError,
+  };
+}

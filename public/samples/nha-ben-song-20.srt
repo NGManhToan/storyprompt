@@ -1,0 +1,123 @@
+1
+00:00:01,000 --> 00:00:05,000
+CẢNH 1. INT. CĂN BẾP - ĐÊM
+Lan đặt ấm trà sắt xuống bàn gỗ. Mưa gõ vào kính đen.
+
+2
+00:00:05,000 --> 00:00:08,000
+LAN: Nước sôi rồi.
+
+3
+00:00:10,000 --> 00:00:14,000
+CẢNH 2. INT. CỬA BẾP - ĐÊM
+Minh đứng ở ngưỡng cửa và gấp ô lại. Lan quay khỏi bếp.
+
+4
+00:00:14,000 --> 00:00:18,000
+MINH: Em đợi anh lâu chưa?
+LAN: Mới đặt ấm xuống thôi.
+
+5
+00:00:20,000 --> 00:00:25,000
+CẢNH 3. INT. BÀN ĂN - ĐÊM
+Lan và Minh ngồi đối diện. Lan đẩy một tách về phía Minh.
+
+6
+00:00:25,000 --> 00:00:30,000
+LAN: Ông Hải để lại chìa khóa trong ngăn kéo.
+MINH: Anh tưởng chìa khóa mất từ năm ngoái.
+
+7
+00:00:32,000 --> 00:00:37,000
+CẢNH 4. INT. CĂN BẾP - ĐÊM
+Minh cầm tấm ảnh trên tủ lạnh. Lan đứng bên cạnh, không chạm vào ảnh.
+
+8
+00:00:37,000 --> 00:00:41,000
+MINH: Ảnh này chụp trước hiên nhà cũ.
+LAN: Ông Hải không có trong tấm đó.
+
+9
+00:00:44,000 --> 00:00:49,000
+CẢNH 5. EXT. HIÊN NHÀ - ĐÊM
+Lan và Minh bước ra hiên. Minh treo chiếc đèn dầu lên cột gỗ.
+
+10
+00:00:52,000 --> 00:00:57,000
+CẢNH 6. EXT. SÔNG - SÁNG
+Minh chèo thuyền nhỏ trên sông. Lan ngồi ở mũi thuyền, tay giữ một giỏ hoa.
+
+11
+00:01:00,000 --> 00:01:05,000
+CẢNH 7. EXT. CHỢ SỚM - SÁNG
+Lan chọn một bó hoa cúc trắng. Minh đứng ngay cạnh và cầm giỏ mây.
+
+12
+00:01:08,000 --> 00:01:13,000
+CẢNH 8. EXT. ĐƯỜNG ĐẤT - SÁNG
+Lan và Minh đi bộ trên đường đất ướt. Minh chỉ về phía mái nhà thấp.
+
+13
+00:01:16,000 --> 00:01:21,000
+CẢNH 9. EXT. NHÀ CŨ - SÁNG
+Lan và Minh đứng trước cửa gỗ đang khóa. Minh thử tay nắm, cửa không nhúc nhích.
+
+14
+00:01:24,000 --> 00:01:29,000
+CẢNH 10. EXT. BẬC THỀM - SÁNG
+Minh nhấc chậu cây và lấy chìa khóa bên dưới. Lan nhìn chậu rồi nhìn cửa.
+
+15
+00:01:32,000 --> 00:01:37,000
+CẢNH 11. INT. PHÒNG KHÁCH CŨ - SÁNG
+Lan và Minh bước vào phòng phủ bụi. Ánh sáng cắt qua khe cửa gỗ.
+
+16
+00:01:40,000 --> 00:01:45,000
+CẢNH 12. INT. PHÒNG KHÁCH CŨ - SÁNG
+Lan kéo cửa sổ gỗ. Minh đứng giữa phòng trong khi bụi bay qua nắng.
+
+17
+00:01:48,000 --> 00:01:53,000
+CẢNH 13. INT. BÀN VIẾT - SÁNG
+Lan nhặt phong bì niêm trên bàn viết. Minh đứng bên và không mở thư.
+
+18
+00:01:53,000 --> 00:01:58,000
+LAN: Chữ ngoài phong bì là của ông Hải.
+MINH: Mình để nguyên niêm phong.
+
+19
+00:02:00,000 --> 00:02:05,000
+CẢNH 14. INT. PHÒNG KHÁCH CŨ - SÁNG
+Minh ngồi xuống sàn gỗ. Lan đứng, một tay vẫn giữ phong bì niêm.
+
+20
+00:02:08,000 --> 00:02:13,000
+CẢNH 15. INT. BẾP CŨ - CHIỀU
+Lan nhóm bếp củi trong góc. Minh rửa hai chiếc bát dưới vòi nước yếu.
+
+21
+00:02:16,000 --> 00:02:21,000
+CẢNH 16. INT. BÀN ĂN CŨ - TỐI
+Lan và Minh ngồi ăn soup. Đèn dầu để giữa bàn, ngọn lửa nhỏ.
+
+22
+00:02:24,000 --> 00:02:29,000
+CẢNH 17. EXT. BẾN SÔNG - ĐÊM
+Lan và Minh đứng đối diện trên bến gỗ. Minh lùi một bước. Lan siết tay vào quai giỏ.
+
+23
+00:02:32,000 --> 00:02:37,000
+CẢNH 18. EXT. BẾN SÔNG - ĐÊM
+Minh đã rời bến từ lúc nãy. Lan đứng một mình dưới đèn vàng, nhìn khúc sông tối.
+
+24
+00:02:40,000 --> 00:02:45,000
+CẢNH 19. EXT. BẾN SÔNG - ĐÊM
+Minh bước trở lại và cầm chiếc đèn vừa sửa. Lan quay về phía ánh đèn.
+
+25
+00:02:48,000 --> 00:02:54,000
+CẢNH 20. EXT. HIÊN NHÀ CŨ - CHẠNG VẠNG
+Lan và Minh ngồi trên bậc hiên. Minh đặt chiếc đèn đã sửa xuống giữa hai người.

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { countWords } from "../core/types.js";
 import type { SceneResult } from "../core/types.js";
 import { wrapPrompt } from "../core/export.js";
 import { useStudio } from "./useStudio.js";
@@ -101,10 +100,10 @@ export function App() {
           ) : (
             <>
               <button className="btn" type="button" disabled={!studio.scenes.length} onClick={() => void studio.run("mock", { fresh: !continueRun })}>
-                Mô phỏng
+                <PlayIcon /> Mô phỏng
               </button>
               <button className="btn primary" type="button" disabled={!studio.scenes.length} onClick={() => void studio.run("live", { fresh: !continueRun })}>
-                Chạy
+                <PlayIcon /> Chạy
               </button>
             </>
           )}
@@ -142,33 +141,35 @@ export function App() {
 
       <div className="body">
         <nav className="icon-rail" aria-label="Điều hướng">
+          <button type="button" onClick={() => setRail("scenes")} aria-label="Tổng quan"><HomeIcon /></button>
           <button type="button" className={rail === "scenes" ? "on" : ""} onClick={() => setRail("scenes")} aria-label="Cảnh"><ListIcon /></button>
           <button type="button" className={rail === "report" ? "on" : ""} onClick={() => setRail("report")} aria-label="Báo cáo"><ChartIcon /></button>
           <button type="button" className={rail === "file" ? "on" : ""} onClick={() => setRail("file")} aria-label="Tệp"><FolderIcon /></button>
           <button type="button" onClick={() => studio.setSettingsOpen(true)} aria-label="Cài đặt"><GearIcon /></button>
         </nav>
-
+        <div className="main">
+          <section className="summary">
+            <div className="overview">
+              <p>Tổng quan dự án</p>
+              <strong>{studio.fileName || "Chưa mở file"}</strong>
+            </div>
+            <Stat n={studio.scenes.length} label="Tổng số cảnh" />
+            <Stat n={counts.done} label="Đã hoàn thành" tone="good" />
+            <Stat n={counts.waiting} label="Đang chờ" />
+            <Stat n={counts.review} label="Cần kiểm tra" tone="warn" />
+            <span className="ring" style={{ ["--p" as string]: String(counts.pct) }}>{counts.pct}%</span>
+            <p className="saved">{savedAt ? `Đã lưu tự động ${new Date(savedAt).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric" })}` : "Chưa lưu tự động"}</p>
+          </section>
+          <div className="work">
         {rail === "file" ? (
           <FileColumn studio={studio} dragOver={dragOver} setDragOver={setDragOver} />
         ) : rail === "report" ? (
           <ReportColumn studio={studio} counts={counts} savedAt={savedAt} />
         ) : (
           <aside className="scene-col">
-            <div className="overview">
-              <div>
-                <p className="kicker">Tổng quan dự án</p>
-                <strong>{studio.fileName || "Chưa mở file"}</strong>
-              </div>
-              <span className="ring" style={{ ["--p" as string]: `${counts.pct}` }}>{counts.pct}%</span>
+            <div className="search-row">
+              <input className="search" value={query} placeholder="Tìm cảnh hoặc lời thoại..." aria-label="Tìm cảnh" onChange={(event) => setQuery(event.target.value)} />
             </div>
-            <div className="stats">
-              <Stat n={studio.scenes.length} label="Tổng số cảnh" />
-              <Stat n={counts.done} label="Đã hoàn thành" tone="good" />
-              <Stat n={counts.waiting} label="Đang chờ" />
-              <Stat n={counts.review} label="Cần kiểm tra" tone="warn" />
-            </div>
-            <p className="saved">{savedAt ? `Đã lưu tự động ${formatClock(savedAt)}` : "Chưa có bản lưu của lượt này"}</p>
-            <input className="search" value={query} placeholder="Tìm cảnh hoặc lời thoại" aria-label="Tìm cảnh" onChange={(event) => setQuery(event.target.value)} />
             <div className="filters">
               {(
                 [
@@ -214,12 +215,15 @@ export function App() {
               title={selected.title}
               source={selected.source}
               timeRange={selected.timeRange}
+              cutReason={selected.cutReason}
               result={selectedResult}
               onPrev={() => selectedIndex > 0 && setSelectedId(studio.scenes[selectedIndex - 1].sceneId)}
               onNext={() => selectedIndex < studio.scenes.length - 1 && setSelectedId(studio.scenes[selectedIndex + 1].sceneId)}
             />
           )}
         </main>
+          </div>
+        </div>
       </div>
 
       {studio.toast ? <div className="toast">{studio.toast}</div> : null}
@@ -317,7 +321,7 @@ function formatDuration(ms: number) {
 }
 
 function SceneStage({
-  studio, index, total, sceneId, title, source, timeRange, result, onPrev, onNext,
+  studio, index, total, sceneId, title, source, timeRange, cutReason, result, onPrev, onNext,
 }: {
   studio: ReturnType<typeof useStudio>;
   index: number;
@@ -326,14 +330,13 @@ function SceneStage({
   title: string;
   source: string;
   timeRange?: string;
+  cutReason?: string;
   result?: SceneResult;
   onPrev: () => void;
   onNext: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ title, environment: "", prompt: "", cast: "" });
   useEffect(() => {
-    setEditing(true);
     setDraft({
       title: result?.title || title,
       environment: result?.environment || "",
@@ -364,33 +367,37 @@ function SceneStage({
       <header className="editor-head">
         <div>
           <p className="kicker">{timeRange || "Cảnh"}</p>
-          <h1>#{sceneId} {title || "Cảnh"}</h1>
+          <h1>#{sceneId} {cutReason || title || "Cảnh"}</h1>
         </div>
         <div className="pager">
-          <button className="btn small" type="button" onClick={onPrev} disabled={index <= 0}>Cảnh trước</button>
+          <button className="btn small" type="button" onClick={onPrev} disabled={index <= 0}>‹ Cảnh trước</button>
           <span>{index + 1} / {total}</span>
-          <button className="btn small" type="button" onClick={onNext} disabled={index >= total - 1}>Cảnh sau</button>
+          <button className="btn small" type="button" onClick={onNext} disabled={index >= total - 1}>Cảnh sau ›</button>
         </div>
       </header>
       <div className="editor-grid">
-        <article className="card">
+        <article className="card speech">
           <header className="card-h">
-            <h2>Lời thoại gốc</h2>
+            <h2>Lời thoại gốc (Tiếng Anh)</h2>
             <span className="badge">SRT</span>
-            <span className="count">{source.length.toLocaleString("vi-VN")} ký tự</span>
           </header>
           <p className="copy">{source}</p>
+          <span className="count">{source.length.toLocaleString("vi-VN")} / 1.000</span>
         </article>
         <article className="card frame">
-          <header className="card-h"><h2>Ảnh minh họa</h2></header>
           <div className="frame-well">
-            <span>Ảnh tạo ở Google Flow</span>
-            <small>Prompt bên dưới là nội dung đưa sang Flow. App không gọi model ảnh.</small>
+            <span className="frame-label">Ảnh minh họa</span>
+            <p>Khung dành cho ảnh Google Flow</p>
+          </div>
+          <div className="thumbs" aria-hidden="true">
+            <button type="button" className="thumb-nav">‹</button>
+            <span /><span /><span /><span />
+            <button type="button" className="thumb-nav">›</button>
           </div>
         </article>
         <article className="card prompt-card">
           <header className="card-h">
-            <h2>Prompt tiếng Anh</h2>
+            <h2>Prompt (Tiếng Anh)</h2>
             <select
               aria-label="Phong cách"
               value={styleId}
@@ -401,21 +408,22 @@ function SceneStage({
             >
               {STYLES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
             </select>
-            <span className="count">{countWords(draft.prompt)} từ · {draft.prompt.length.toLocaleString("vi-VN")} ký tự</span>
           </header>
-          <textarea value={draft.prompt} aria-label="Prompt" rows={6} placeholder="Chưa có prompt." onChange={(event) => setDraft({ ...draft, prompt: event.target.value })} />
-          {result?.visibleCast.length ? <div className="chips">{result.visibleCast.map((name) => <span key={name} className="chip static">{name}</span>)}{result.cameraAngle ? <span className="chip static">{result.shotSequence ? `${result.shotSequence} · ` : ""}{result.cameraAngle}</span> : null}</div> : null}
+          <textarea value={draft.prompt} aria-label="Prompt" rows={5} placeholder="Chưa có prompt." onChange={(event) => setDraft({ ...draft, prompt: event.target.value })} />
+          <span className="count">{draft.prompt.length.toLocaleString("vi-VN")} / 2.000</span>
           {result?.rejections.length ? <ul className="reasons">{result.rejections.map((reason) => <li key={reason.code}>{reason.detail}</li>)}</ul> : null}
-          {shown && draft.prompt ? <p className="preview">{shown}</p> : null}
         </article>
       </div>
       <footer className="editor-bar">
         <button className="btn" type="button" disabled={studio.phase === "running"} onClick={() => void studio.run(studio.lastMode, { only: [sceneId], prior: studio.results.map((item) => item.sceneId === sceneId ? { ...item, status: "pending", attempts: 0, prompt: "", rejections: [] } : item) })}>Viết lại prompt</button>
         <button className="btn" type="button" onClick={() => void navigator.clipboard.writeText(shown || draft.prompt)}>Sao chép</button>
         <button className="btn ghost" type="button" onClick={() => setDraft({ ...draft, prompt: "" })}>Xóa nội dung</button>
-        <span className={`status ${result?.status ?? "pending"}`}>{STATUS_LABEL[result?.status ?? "pending"]}</span>
-        <button className="btn primary" type="button" onClick={() => studio.saveEdit(sceneId, { ...draft, cast: draft.cast || result?.visibleCast.join(", ") || "" })}>Lưu</button>
-        {editing ? <span className="muted">Ctrl+S</span> : null}
+        <label className="status-select">Trạng thái:
+          <select value={result?.status ?? "pending"} disabled aria-label="Trạng thái">
+            <option value={result?.status ?? "pending"}>{STATUS_LABEL[result?.status ?? "pending"]}</option>
+          </select>
+        </label>
+        <button className="btn primary" type="button" onClick={() => studio.saveEdit(sceneId, { ...draft, cast: draft.cast || result?.visibleCast.join(", ") || "" })}>Lưu (Ctrl + S)</button>
       </footer>
     </section>
   );
@@ -469,6 +477,12 @@ function Guide({ onClose }: { onClose: () => void }) {
   );
 }
 
+function HomeIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11 12 4l8 7v9H4z" /></svg>;
+}
+function PlayIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7v10l8-5z" fill="currentColor" stroke="none" /></svg>;
+}
 function ThemeIcon({ dark }: { dark: boolean }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r={dark ? 4 : 5} /><path d="M12 3v2M12 19v2M3 12h2M19 12h2" /></svg>;
 }

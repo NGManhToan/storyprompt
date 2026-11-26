@@ -445,5 +445,6 @@ export function useStudio() {
     saveEdit,
     copyAll,
     download,
+    project,
   };
 }

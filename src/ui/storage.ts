@@ -95,12 +95,17 @@ export function saveUsage(usage: DayUsage) {
 const DB = "storyprompt-web";
 const STORE = "checkpoints";
 
+const STILLS = "stills";
+
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB, 1);
+    const request = indexedDB.open(DB, 2);
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(STORE)) {
         request.result.createObjectStore(STORE, { keyPath: "id" });
+      }
+      if (!request.result.objectStoreNames.contains(STILLS)) {
+        request.result.createObjectStore(STILLS, { keyPath: "id" });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -120,6 +125,39 @@ export async function saveCheckpoint(checkpoint: Checkpoint): Promise<void> {
     db.close();
   } catch {
     /* trình duyệt riêng tư vẫn chạy được trong bộ nhớ */
+  }
+}
+
+export async function saveStills(id: string, images: Record<string, string[]>): Promise<void> {
+  if (!id) return;
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STILLS, "readwrite");
+      tx.objectStore(STILLS).put({ id, images });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {
+    /* bộ nhớ riêng của phiên vẫn giữ ảnh */
+  }
+}
+
+export async function loadStills(id: string): Promise<Record<string, string[]> | null> {
+  if (!id) return null;
+  try {
+    const db = await openDb();
+    const row = await new Promise<{ images?: Record<string, string[]> } | null>((resolve, reject) => {
+      const tx = db.transaction(STILLS, "readonly");
+      const request = tx.objectStore(STILLS).get(id);
+      request.onsuccess = () => resolve(request.result ?? null);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return row?.images ?? null;
+  } catch {
+    return null;
   }
 }
 

@@ -16,3 +16,37 @@ svg.lucide{width:1em;height:1em;vertical-align:-.125em}
 main.collapsed{grid-template-columns:calc(46 * var(--u)) minmax(0,1fr)}
 main.collapsed .scenes{display:none}
 main.collapsed .overview,main.collapsed .workspace{grid-column:2}
+/* UI-009: --u max 1.4px froze the 252u column near 19% on wide screens. */
+main{grid-template-columns:calc(46 * var(--u)) minmax(240px,25%) minmax(0,1fr);height:calc(100dvh - calc(52 * var(--u)));min-height:0;align-items:stretch}
+#root{min-height:100dvh;display:flex;flex-direction:column}
+header{flex:none}
+.scenes{display:flex;flex-direction:column;min-height:0;height:100%;overflow:hidden}
+#list{max-height:none;flex:1;min-height:0}
+.workspace{min-height:0;overflow:auto}
+/* UI-010 UI-020: 8u tabs overflowed and were unreadably small. */
+.tabs{flex-wrap:wrap}
+.tabs button,.pill,.actions,.paging,.tag,.field small,.scene{font-size:max(12px,calc(12 * var(--u)))}
+.scene-head h1{font-size:max(20px,calc(20 * var(--u)))}
+/* UI-018 UI-008: the track grew with flex 1 and the 9px mark looked finished at 0%. */
+.progress{flex:0 1 auto}
+.track{flex:none;width:min(110px,14vw)}
+.track i{width:0;border-radius:20px}
+button:disabled{opacity:.38;cursor:not-allowed;filter:grayscale(.55)}
+.photo-label{white-space:nowrap;z-index:1;max-width:70%;overflow:hidden}
+.photo button{z-index:1}
+.photo .remove-still{top:auto;bottom:8px;right:8px}
+.logo{display:grid;place-items:center;width:calc(28 * var(--u));height:calc(28 * var(--u));background:var(--green);color:#fff;border-radius:8px;font-size:calc(14 * var(--u))}
+.logo svg{fill:currentColor}
+/* UI-012 UI-013: without a still, 1fr made the copy full-bleed. */
+.editor-grid.solo{grid-template-columns:minmax(0,68ch)}
+.editor-grid.solo .editors{grid-template-rows:auto auto}
+.editor-grid:not(.solo) .editors{min-height:0}
+.restore{position:fixed;z-index:40;left:50%;top:calc(64 * var(--u));transform:translateX(-50%);display:flex;gap:10px;align-items:center;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:12px 14px;max-width:min(560px,92vw)}
+.restore p{margin:0;color:var(--ink)}
+.restore .primary{color:#fff}
+.empty-screen{grid-column:2;display:grid;place-items:center;min-height:0}
+.empty-card{width:min(520px,100%);display:grid;gap:12px;justify-items:center;text-align:center;padding:28px 22px}
+.empty-card h1{margin:0;font-size:24px}
+.drop{width:100%;border:1.5px dashed var(--green);border-radius:14px;padding:28px 16px;background:var(--field);cursor:pointer}
+.drop.over{background:var(--soft)}
+main.empty{grid-template-columns:calc(46 * var(--u)) minmax(0,1fr)}

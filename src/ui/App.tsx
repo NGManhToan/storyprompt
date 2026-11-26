@@ -14,7 +14,9 @@ import {
   FileText,
   Folder,
   House,
+  ImagePlus,
   LayoutGrid,
+  Upload,
   Maximize2,
   Moon,
   Play,
@@ -26,6 +28,7 @@ import {
 } from "lucide-react";
 import type { SceneResult } from "../core/types.js";
 import { wrapPrompt } from "../core/export.js";
+import { loadStills, saveStills } from "./storage.js";
 import { useStudio } from "./useStudio.js";
 
 const STYLES = [
@@ -55,9 +58,19 @@ function dashRange(value?: string) {
   return (value || "").replace(" - ", " – ");
 }
 
+function readDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
 export function App() {
   const studio = useStudio();
   const fileRef = useRef<HTMLInputElement>(null);
+  const imageRef = useRef<HTMLInputElement>(null);
   const fixtureStarted = useRef(false);
   const [query, setQuery] = useState("");
   const [listFilter, setListFilter] = useState<Bucket | "all">("all");
@@ -68,6 +81,10 @@ export function App() {
   const [notice, setNotice] = useState("");
   const [stills, setStills] = useState<Record<string, string[]>>({});
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [saveState, setSaveState] = useState<"idle" | "unsaved" | "saving" | "saved" | "failed">("idle");
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [dragOver, setDragOver] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   useEffect(() => {
     document.body.classList.toggle("dark", studio.theme === "dark");
@@ -95,6 +112,22 @@ export function App() {
       setSelectedId(studio.scenes[0].sceneId);
     }
   }, [studio.scenes, selectedId]);
+
+  useEffect(() => {
+    if (!studio.project) return;
+    let cancel = false;
+    void loadStills(studio.project).then((rows) => {
+      if (!cancel && rows) setStills((current) => ({ ...rows, ...current }));
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [studio.project]);
+
+  useEffect(() => {
+    if (!studio.project) return;
+    void saveStills(studio.project, stills);
+  }, [studio.project, stills]);
 
   useEffect(() => {
     if (!notice) return;
@@ -125,6 +158,29 @@ export function App() {
   const usable = studio.results.some((row) => row.prompt && (row.status === "accepted" || row.status === "edited"));
   const images = selected ? stills[selected.sceneId] ?? [] : [];
 
+  useEffect(() => {
+    if (!selected) return;
+    const text = drafts[selected.sceneId];
+    if (text === undefined || text === (selectedResult?.prompt ?? "")) return;
+    setSaveState("unsaved");
+    const timer = window.setTimeout(() => {
+      setSaveState("saving");
+      try {
+        studio.saveEdit(selected.sceneId, {
+          title: selected.cutReason || selected.title,
+          environment: selectedResult?.environment || "",
+          prompt: text,
+          cast: selectedResult?.visibleCast.join(", ") || "",
+        });
+        setSaveState("saved");
+        setSavedAt(Date.now());
+      } catch {
+        setSaveState("failed");
+      }
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [drafts, selected, selectedResult, studio]);
+
   function openFile() {
     fileRef.current?.click();
   }
@@ -134,10 +190,17 @@ export function App() {
     const script = files.find((file) => /\.(srt|txt)$/i.test(file.name));
     const pictures = files.filter((file) => file.type.startsWith("image/"));
     if (script) void studio.onFile(script);
-    if (pictures.length && selected) {
-      const urls = pictures.map((file) => URL.createObjectURL(file));
-      setStills((current) => ({ ...current, [selected.sceneId]: [...(current[selected.sceneId] ?? []), ...urls] }));
-    }
+    if (!script && !pictures.length && files.length) setNotice("Chỉ nhận file .srt hoặc .txt.");
+    if (pictures.length && selected) void addImages(selected.sceneId, pictures);
+  }
+
+  async function addImages(sceneId: string, pictures: File[]) {
+    const urls = await Promise.all(pictures.map((file) => readDataUrl(file)));
+    setStills((current) => ({ ...current, [sceneId]: [...(current[sceneId] ?? []), ...urls] }));
+  }
+
+  function removeImage(sceneId: string, index: number) {
+    setStills((current) => ({ ...current, [sceneId]: (current[sceneId] ?? []).filter((_, item) => item !== index) }));
   }
 
   async function copyText(value: string) {
@@ -149,30 +212,36 @@ export function App() {
     }
   }
 
-  const savedLabel = savedAt
-    ? new Date(savedAt).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric" })
-    : "Chưa có bản lưu";
+  const savedLabel = saveState === "saving"
+    ? "Đang lưu"
+    : saveState === "failed"
+      ? "Lưu thất bại"
+      : saveState === "saved" && savedAt
+        ? `Đã lưu ${new Date(savedAt).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric" })}`
+        : saveState === "unsaved"
+          ? "Chưa lưu"
+          : "Chưa lưu";
 
   return (
     <>
       <header>
-        <div className="brand"><span className="logo"><Play size={28} /></span> StoryPrompt</div>
+        <div className="brand"><span className="logo" title="StoryPrompt"><Play size={16} fill="currentColor" strokeWidth={0} /></span> StoryPrompt</div>
         <button className="file" type="button" onClick={openFile}>
           <FileText size={16} /> {studio.fileName || "Chưa có file"} <ChevronDown size={14} />
         </button>
         <input ref={fileRef} type="file" accept=".srt,.txt,image/*" onChange={(event) => { if (event.target.files) takeFiles(event.target.files); event.target.value = ""; }} />
-        <div className="progress">{counts.done} / {studio.scenes.length || 0} cảnh <div className="track"><i /></div> {counts.pct}%</div>
+        <div className="progress">{counts.done} / {studio.scenes.length || 0} cảnh <div className="track"><i style={{ width: `${counts.pct}%` }} /></div> {counts.pct}%</div>
         <div className="head-actions">
           {studio.phase === "running" ? (
             <button type="button" onClick={studio.stop}>Dừng</button>
           ) : (
             <>
-              <button type="button" disabled={!studio.scenes.length} onClick={() => void studio.run("mock", { fresh: !usable })}><Play size={14} /> Mô phỏng</button>
-              <button className="primary" type="button" disabled={!studio.scenes.length} onClick={() => void studio.run("live", { fresh: !usable })}><Play size={14} /> Chạy</button>
+              <button type="button" title="Mô phỏng, không gọi API" disabled={!studio.scenes.length} onClick={() => void studio.run("mock", { fresh: !usable })}><Play size={14} /> Mô phỏng</button>
+              <button className="primary" type="button" title="Chạy với khóa đã lưu trên máy" disabled={!studio.scenes.length} onClick={() => void studio.run("live", { fresh: !usable })}><Play size={14} /> Chạy</button>
             </>
           )}
           <div className="menu">
-            <button type="button" onClick={() => setExportOpen((open) => !open)}><Download size={14} /> Xuất</button>
+            <button type="button" title="Xuất prompt" disabled={!usable} onClick={() => setExportOpen((open) => !open)}><Download size={14} /> Xuất</button>
             {exportOpen ? (
               <div className="menu-pop">
                 <button type="button" onClick={() => { void studio.copyAll(); setExportOpen(false); }}>Sao chép tất cả</button>
@@ -183,36 +252,54 @@ export function App() {
               </div>
             ) : null}
           </div>
-          <button className="round" type="button" aria-label="Thông báo" onClick={() => setReportOpen(true)}><Bell size={14} /></button>
-          <button className="avatar" type="button" aria-label="Hồ sơ">T</button>
-          <button id="theme" type="button" aria-label="Đổi giao diện" onClick={() => studio.setTheme(studio.theme === "dark" ? "light" : "dark")}>
+          <button className="round" type="button" aria-label="Thông báo" title="Báo cáo" onClick={() => setReportOpen(true)}><Bell size={14} /></button>
+          <button className="avatar" type="button" aria-label="Hồ sơ" title="Hồ sơ">T</button>
+          <button id="theme" type="button" aria-label="Đổi giao diện" title="Đổi nền" onClick={() => studio.setTheme(studio.theme === "dark" ? "light" : "dark")}>
             {studio.theme === "dark" ? <Moon size={14} /> : <Sun size={14} />}
           </button>
         </div>
       </header>
       <main
-        className={collapsed ? "collapsed" : undefined}
+        className={studio.scenes.length ? (collapsed ? "collapsed" : undefined) : "empty"}
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => { event.preventDefault(); if (event.dataTransfer.files.length) takeFiles(event.dataTransfer.files); }}
       >
         <nav className="rail" aria-label="Điều hướng">
           <button type="button" title="Trang chủ" onClick={() => { setCollapsed(false); setListFilter("all"); }}><House /></button>
-          <button className="primary" type="button" title="Cảnh" onClick={() => setCollapsed(false)}><LayoutGrid /></button>
+          <button className="primary" type="button" title="Danh sách cảnh" onClick={() => setCollapsed(false)}><LayoutGrid /></button>
           <button type="button" title="Báo cáo" onClick={() => setReportOpen(true)}><BarChart3 /></button>
-          <button type="button" title="Tệp" onClick={openFile}><Folder /></button>
+          <button type="button" title="Mở tệp" onClick={openFile}><Folder /></button>
           <button type="button" title="Cài đặt" onClick={() => studio.setSettingsOpen(true)}><Settings /></button>
-          <button className="collapse" type="button" title="Thu gọn" onClick={() => setCollapsed((value) => !value)}><ChevronRight /></button>
+          <button className="collapse" type="button" title={collapsed ? "Mở danh sách" : "Thu danh sách"} onClick={() => setCollapsed((value) => !value)}><ChevronRight /></button>
         </nav>
-        <section className="overview card">
+        {studio.scenes.length > 0 ? <section className="overview card">
           <div className="project"><span className="stat-icon"><FileText /></span><div><b>Tổng quan dự án</b><small>{studio.fileName || "Chưa mở file"}</small></div></div>
           <div className="stat"><span className="stat-icon"><LayoutGrid /></span><div><b>{studio.scenes.length}</b><small>Tổng số cảnh</small></div></div>
           <div className="stat"><span className="stat-icon done"><Check /></span><div><b>{counts.done}</b><small>Đã hoàn thành</small></div></div>
           <div className="stat"><span className="stat-icon"><Clock /></span><div><b>{counts.waiting}</b><small>Đang chờ</small></div></div>
           <div className="stat"><span className="stat-icon warn"><AlertTriangle /></span><div><b>{counts.review}</b><small>Cần kiểm tra</small></div></div>
           <div className="ring">{counts.pct}%</div>
-          <div className="saved"><Cloud /> Đã lưu tự động<small>{savedLabel}</small></div>
-        </section>
-        <aside className="scenes card">
+          <div className="saved"><Cloud /> {savedLabel.startsWith("Đã lưu") ? "Đã lưu tự động" : savedLabel}<small>{savedLabel.startsWith("Đã lưu") ? savedLabel.replace("Đã lưu ", "") : ""}</small></div>
+        </section> : null}
+        {studio.scenes.length === 0 ? (
+          <section className="empty-screen">
+            <article className="card empty-card">
+              <span className="logo" aria-hidden="true"><Play size={16} fill="currentColor" strokeWidth={0} /></span>
+              <h1>Mở kịch bản</h1>
+              <p>Thả file .srt hoặc .txt vào đây. Mỗi cảnh sẽ có một prompt tiếng Anh cho Google Flow.</p>
+              <label className={dragOver ? "drop over" : "drop"} onDragOver={(event) => { event.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={(event) => { event.preventDefault(); setDragOver(false); if (event.dataTransfer.files.length) takeFiles(event.dataTransfer.files); }}>
+                <Upload /> Thả file vào đây
+                <input type="file" accept=".srt,.txt,text/plain" onChange={(event) => { if (event.target.files) takeFiles(event.target.files); }} />
+              </label>
+              <div className="paging">
+                <button type="button" onClick={openFile}>Chọn file</button>
+                <button className="primary" type="button" onClick={() => void studio.loadSample()}>Mở file mẫu</button>
+              </div>
+              {studio.resumeOffer ? <p>Có bản lưu {new Date(studio.resumeOffer.savedAt).toLocaleString("vi-VN")}.</p> : null}
+            </article>
+          </section>
+        ) : null}
+        {studio.scenes.length > 0 ? <aside className="scenes card">
           <div className="search">
             <input id="search" placeholder="Tìm cảnh hoặc lời thoại…" value={query} aria-label="Tìm cảnh" onChange={(event) => setQuery(event.target.value)} />
             <button type="button" aria-label="Bộ lọc" onClick={() => setListFilter("all")}><SlidersHorizontal /></button>
@@ -237,8 +324,8 @@ export function App() {
               );
             })}
           </div>
-        </aside>
-        <section className="workspace">
+        </aside> : null}
+        {studio.scenes.length > 0 ? <section className="workspace">
           {selected ? (
             <SceneWorkspace
               studio={studio}
@@ -250,32 +337,31 @@ export function App() {
               total={studio.scenes.length}
               result={selectedResult}
               images={images}
-              seedPrompt={selected.sceneId === "001" && new URLSearchParams(window.location.search).has("fixture") ? FIXTURE_PROMPT : ""}
+              prompt={drafts[selected.sceneId] ?? (selectedResult?.prompt || (selected.sceneId === "001" && new URLSearchParams(window.location.search).has("fixture") ? FIXTURE_PROMPT : ""))}
+              onPrompt={(value) => {
+                setDrafts((current) => ({ ...current, [selected.sceneId]: value }));
+                setSaveState("unsaved");
+              }}
               onPrev={() => selectedIndex > 0 && setSelectedId(studio.scenes[selectedIndex - 1].sceneId)}
               onNext={() => selectedIndex < studio.scenes.length - 1 && setSelectedId(studio.scenes[selectedIndex + 1].sceneId)}
               onCopy={copyText}
-              onSaved={() => setSavedAt(Date.now())}
+              onSaved={(ok) => { setSaveState(ok ? "saved" : "failed"); if (ok) setSavedAt(Date.now()); }}
+              onAddImages={() => imageRef.current?.click()}
+              onRemoveImage={(index) => removeImage(selected.sceneId, index)}
+              confirmClear={confirmClear}
+              setConfirmClear={setConfirmClear}
             />
-          ) : (
-            <div className="scene-head">
-              <div>
-                <small>Chưa có cảnh</small>
-                <h1>Mở file .srt hoặc .txt</h1>
-              </div>
-              <div className="paging">
-                <button type="button" onClick={openFile}>Chọn file</button>
-                <button type="button" onClick={() => void studio.loadSample()}>File mẫu</button>
-              </div>
-            </div>
-          )}
-        </section>
+          ) : null}
+        </section> : null}
       </main>
+      <input ref={imageRef} type="file" accept="image/*" multiple onChange={(event) => { if (event.target.files && selected) void addImages(selected.sceneId, [...event.target.files]); event.target.value = ""; }} />
       <div id="toast" role="status" style={{ display: notice || studio.toast || studio.error ? "block" : "none" }}>{studio.error || notice || studio.toast}</div>
       {reportOpen ? <ReportDialog studio={studio} counts={counts} onClose={() => setReportOpen(false)} /> : null}
       {studio.settingsOpen ? <SettingsDrawer studio={studio} onClose={() => studio.setSettingsOpen(false)} /> : null}
       {studio.resumeOffer ? (
-        <div id="toast" role="status" style={{ display: "block" }}>
-          Có bản lưu. <button type="button" onClick={() => studio.applyCheckpoint(studio.resumeOffer!)}>Tiếp tục</button>
+        <div className="restore" role="dialog" aria-label="Khôi phục bản lưu">
+          <p>Có bản lưu {new Date(studio.resumeOffer.savedAt).toLocaleString("vi-VN")} của {studio.resumeOffer.fileName}.</p>
+          <button className="primary" type="button" onClick={() => studio.applyCheckpoint(studio.resumeOffer!)}>Tiếp tục</button>
           <button type="button" onClick={studio.dismissResume}>Bỏ</button>
         </div>
       ) : null}
@@ -284,7 +370,7 @@ export function App() {
 }
 
 function SceneWorkspace({
-  studio, sceneId, title, source, timeRange, index, total, result, images, seedPrompt, onPrev, onNext, onCopy, onSaved,
+  studio, sceneId, title, source, timeRange, index, total, result, images, prompt, onPrompt, onPrev, onNext, onCopy, onSaved, onAddImages, onRemoveImage, confirmClear, setConfirmClear,
 }: {
   studio: ReturnType<typeof useStudio>;
   sceneId: string;
@@ -295,26 +381,33 @@ function SceneWorkspace({
   total: number;
   result?: SceneResult;
   images: string[];
-  seedPrompt: string;
+  prompt: string;
+  onPrompt: (value: string) => void;
   onPrev: () => void;
   onNext: () => void;
   onCopy: (value: string) => void;
-  onSaved: () => void;
+  onSaved: (ok: boolean) => void;
+  onAddImages: () => void;
+  onRemoveImage: (index: number) => void;
+  confirmClear: boolean;
+  setConfirmClear: (value: boolean) => void;
 }) {
-  const [prompt, setPrompt] = useState("");
   const [photo, setPhoto] = useState(0);
   const [zoom, setZoom] = useState(false);
   useEffect(() => {
-    setPrompt(result?.prompt || (sceneId === "001" ? seedPrompt : ""));
     setPhoto(0);
-  }, [sceneId, result?.prompt, seedPrompt]);
+  }, [sceneId]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
-        studio.saveEdit(sceneId, { title, environment: result?.environment || "", prompt, cast: result?.visibleCast.join(", ") || "" });
-        onSaved();
+        try {
+          studio.saveEdit(sceneId, { title, environment: result?.environment || "", prompt, cast: result?.visibleCast.join(", ") || "" });
+          onSaved(true);
+        } catch {
+          onSaved(false);
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -339,7 +432,7 @@ function SceneWorkspace({
           <button id="next" type="button" onClick={onNext} disabled={index >= total - 1}>Cảnh sau <ChevronRight /></button>
         </div>
       </div>
-      <div className="editor-grid" style={images.length ? undefined : { gridTemplateColumns: "1fr" }}>
+      <div className={images.length ? "editor-grid" : "editor-grid solo"}>
         <div className="editors">
           <article className="card editor">
             <div className="editor-head">
@@ -371,7 +464,7 @@ function SceneWorkspace({
               <button className="mini" id="copyPrompt" type="button" aria-label="Sao chép prompt" onClick={() => onCopy(shown || prompt)}><Copy /></button>
             </div>
             <div className="field">
-              <textarea id="prompt" placeholder="Chưa có prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} />
+              <textarea id="prompt" placeholder="Chưa có prompt. Bấm Viết lại prompt để tạo từ lời thoại." value={prompt} onChange={(event) => onPrompt(event.target.value)} />
               <small id="promptCount">{prompt.length.toLocaleString("vi-VN")} / 2.000</small>
             </div>
           </article>
@@ -380,7 +473,8 @@ function SceneWorkspace({
           <div className="photo">
             {src ? <img id="photo" src={src} alt="Ảnh minh họa cảnh" /> : null}
             <span className="photo-label">Ảnh minh họa</span>
-            <button id="expand" type="button" aria-label="Mở rộng ảnh" onClick={() => setZoom(true)}><Maximize2 /></button>
+            <button id="expand" type="button" aria-label="Mở rộng ảnh" title="Mở rộng" onClick={() => setZoom(true)}><Maximize2 /></button>
+            <button className="remove-still" type="button" title="Xóa ảnh này" onClick={() => onRemoveImage(photo)}>×</button>
           </div>
           <div className="thumbs">
             <button id="imagePrev" type="button" aria-label="Ảnh trước" onClick={() => setPhoto((value) => (value + images.length - 1) % images.length)}><ChevronLeft /></button>
@@ -391,14 +485,15 @@ function SceneWorkspace({
                 </button>
               ))}
             </div>
-            <button id="imageNext" type="button" aria-label="Ảnh sau" onClick={() => setPhoto((value) => (value + 1) % images.length)}><ChevronRight /></button>
+            <button id="imageNext" type="button" aria-label="Ảnh sau" title="Ảnh sau" onClick={() => setPhoto((value) => (value + 1) % images.length)}><ChevronRight /></button>
           </div>
         </article>
       </div>
       <div className="actions">
-        <button className="primary" id="rewrite" type="button" disabled={studio.phase === "running"} onClick={() => void studio.run(studio.lastMode, { only: [sceneId], prior: studio.results.map((item) => item.sceneId === sceneId ? { ...item, status: "pending", attempts: 0, prompt: "", rejections: [] } : item) })}><Sparkles /> Viết lại prompt</button>
-        <button id="copy" type="button" onClick={() => onCopy(shown || prompt)}><Copy /> Sao chép</button>
-        <button id="clear" type="button" onClick={() => setPrompt("")}><Trash2 /> Xóa nội dung</button>
+        <button className="primary" id="rewrite" type="button" title="Viết lại prompt cảnh này" disabled={studio.phase === "running"} onClick={() => void studio.run(studio.lastMode, { only: [sceneId], prior: studio.results.map((item) => item.sceneId === sceneId ? { ...item, status: "pending", attempts: 0 } : item) })}><Sparkles /> Viết lại prompt</button>
+        <button id="copy" type="button" title="Sao chép prompt" onClick={() => onCopy(shown || prompt)}><Copy /> Sao chép</button>
+        <button id="clear" type="button" title="Xóa nội dung prompt" onClick={() => setConfirmClear(true)}><Trash2 /> Xóa nội dung</button>
+        <button type="button" title="Thêm ảnh cho cảnh này" onClick={onAddImages}><ImagePlus /> Thêm ảnh</button>
         <div className="spacer" />
         <label>Trạng thái:
           <select id="status" value={status} aria-label="Trạng thái" onChange={() => undefined}>
@@ -407,8 +502,15 @@ function SceneWorkspace({
             <option value="review">Cần kiểm tra</option>
           </select>
         </label>
-        <button className="primary" id="save" type="button" onClick={() => { studio.saveEdit(sceneId, { title, environment: result?.environment || "", prompt, cast: result?.visibleCast.join(", ") || "" }); onSaved(); }}> <Check /> Lưu (Ctrl + S)</button>
+        <button className="primary" id="save" type="button" title="Lưu (Ctrl+S)" onClick={() => { try { studio.saveEdit(sceneId, { title, environment: result?.environment || "", prompt, cast: result?.visibleCast.join(", ") || "" }); onSaved(true); } catch { onSaved(false); } }}><Check /> Lưu (Ctrl + S)</button>
       </div>
+      {confirmClear ? (
+        <dialog open>
+          <p>Xóa nội dung prompt của cảnh này?</p>
+          <button type="button" onClick={() => { onPrompt(""); setConfirmClear(false); }}>Xóa</button>
+          <button type="button" onClick={() => setConfirmClear(false)}>Giữ lại</button>
+        </dialog>
+      ) : null}
       {zoom && src ? (
         <dialog id="lightbox" open onClick={() => setZoom(false)}>
           <button id="close" type="button" onClick={() => setZoom(false)}>Đóng ×</button>

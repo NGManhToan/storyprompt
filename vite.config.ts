@@ -7,6 +7,7 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 47221,
     strictPort: true,
+    allowedHosts: [".cursorvm.com"],
     proxy: {
       "/api": {
         target: "http://127.0.0.1:47222",
@@ -18,6 +19,7 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 47221,
     strictPort: true,
+    allowedHosts: [".cursorvm.com"],
   },
   test: {
     include: ["tests/**/*.test.ts"],

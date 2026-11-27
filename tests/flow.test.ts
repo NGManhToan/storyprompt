@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { normalizeVisibleCast } from "../src/core/cast.js";
 import { toFlowSheet } from "../src/core/export.js";
-import { composeFlowPrompt, DEFAULT_CHARACTERS, FLOW_STYLE_FOOTER, referencesFor, tagCast } from "../src/core/flow.js";
+import { composeFlowPrompt, DEFAULT_CHARACTERS, FLOW_STYLE_FOOTER, referencesFor, softenBannedLight, tagCast } from "../src/core/flow.js";
 import { buildSceneRequest } from "../src/core/prompts.js";
 import type { Scene, SceneDraft, SceneResult, SceneTask } from "../src/core/types.js";
 import { emptyResult } from "../src/core/types.js";
@@ -178,4 +178,34 @@ describe("AI Studio conventions", () => {
     expect(composeFlowPrompt("wide shot of the kitchen.", [], "", "", undefined)).toBe("Wide shot of the kitchen.");
     expect(composeFlowPrompt("wide shot of the kitchen.", [], "", "", "16:9")).toBe("Wide shot of the kitchen. --ar 16:9");
   });
+
+  it("tags leftover your/you even when @You is already present", () => {
+    expect(tagCast("First-person POV of @You's hand marking a calendar toward your 35th birthday.", ["You"])).toBe(
+      "First-person POV of @You's hand (pure flat white skin #FFFFFF) marking a calendar toward @You's 35th birthday.",
+    );
+    expect(tagCast("Medium shot of @You looking at you in the mirror.", ["You"])).toBe("Medium shot of @You looking at @You in the mirror.");
+  });
+
+  it("rewrites banned lighting words copied from the source", () => {
+    const raw = "Medium shot of @You sitting at a metal desk under harsh overhead fluorescent lights, observing the stacks of paperwork and the ledger book inside the dusty, beige logistics office during the morning hours.";
+    const soft = softenBannedLight(raw);
+    expect(soft).toContain("plain overhead fluorescent lights");
+    expect(soft).not.toMatch(/\bharsh\b/i);
+    const task: SceneTask = {
+      sceneId: "076",
+      title: "Office",
+      source: "your financial baseline began at $24 an hour, netting $48,000 a year in a regional logistics office while you sat under harsh fluorescent lights.",
+      likelyPresent: ["You"],
+      neighbors: [],
+    };
+    const verdict = validateDraft(
+      { scene_id: "076", title: "Office", environment: "Logistics office", prompt: soft, visible_cast: ["You"], source_anchor: "your financial baseline began at $24 an hour" },
+      task,
+      ROSTER,
+      [],
+      new Map(),
+    );
+    expect(verdict.rejections).toEqual([]);
+  });
+
 });

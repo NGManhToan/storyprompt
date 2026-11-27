@@ -149,7 +149,7 @@ Change location only when the script moves or a cutaway is required.
 LOOK:
 Flat 2D cartoon illustration that must match the character reference images (clean outlines, flat colors). Do not write the style footer yourself. Code appends it.
 Describe only physical action, posture, objects and place. NEVER write emotion words or labels (dread, panic, worried, worry, fear, afraid, anxious, nervous, terror, horror, hysteria, despair, agony, frantic, stress, tense, sad, angry, shock, uneasy). Convey tension only through mechanical facts: what the hands and objects are doing.
-Light must be plain and even: "soft daylight", "plain overhead light", "warm lamp light". NEVER write dramatic or cinematic lighting: no long/deep/dark/harsh shadows, no "casting shadows", harsh, flickering, moody, dramatic, ominous, eerie, gloomy, noir, cinematic, glaring, neon glow.
+Light must be plain and even: "soft daylight", "plain overhead light", "warm lamp light". NEVER write dramatic or cinematic lighting: no long/deep/dark/harsh shadows, no "casting shadows", harsh, flickering, moody, dramatic, ominous, eerie, gloomy, noir, cinematic, glaring, neon glow. If the SOURCE itself uses a banned word (for example "harsh fluorescent lights"), do not copy it — rewrite as "plain overhead light" or "soft daylight".
 prompt: one English sentence of 28 to 42 words, in this order: camera framing, who (tagged) does what action now, the place implied by the line, then the light. End with a period.
 No dialogue, quotations, subtitles, captions, readable signs, or title cards.
 

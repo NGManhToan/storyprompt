@@ -1,5 +1,5 @@
 import { extractNames, inferPresence, normalizeVisibleCast } from "./cast.js";
-import { tagCast } from "./flow.js";
+import { softenBannedLight, tagCast } from "./flow.js";
 import { isAbortError } from "./errors.js";
 import {
   bibleDigest,
@@ -401,7 +401,7 @@ export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
             let first: { draft: SceneDraft; rejections: Rejection[] } | null = null;
             for (const row of rows) {
               const repaired = repairEnding(row.prompt);
-              const candidate = { ...row, prompt: repaired.prompt, visible_cast: normalizeVisibleCast(row.visible_cast, knownNames) };
+              const candidate = { ...row, prompt: softenBannedLight(repaired.prompt), visible_cast: normalizeVisibleCast(row.visible_cast, knownNames) };
               const verdict = validateDraft(candidate, task, knownNames, neighborPrompts(task), seenKeys());
               if (verdict.ok) {
                 draft = candidate;

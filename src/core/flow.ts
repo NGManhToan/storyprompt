@@ -25,6 +25,19 @@ export function stripHandSkin(text: string): string {
 }
 
 /** Khi chỉ thấy tay/bộ phận của @You thì thêm đúng cụm của AI Studio, một lần. */
+/**
+ * Model đôi khi chép từ nguồn các từ ánh sáng bị cấm ("harsh fluorescent lights").
+ * Đổi sang ánh sáng đều trước khi kiểm, giữ số từ.
+ */
+export function softenBannedLight(prompt: string): string {
+  return prompt
+    .replace(/\bharsh\b/gi, "plain")
+    .replace(/\bflicker(?:ing|s|ed)?\b/gi, "steady")
+    .replace(/\b(?:long|deep|dark|heavy|stark|sharp|hard)\s+((?:\w+\s+)?shadows?)\b/gi, "soft $1")
+    .replace(/\b(?:casting|cast)\s+(?:(?:long|deep|dark|heavy|stark|plain|sharp|hard|soft)\s+)?shadows?\b/gi, "even light")
+    .replace(/\b(?:moody|dramatic(?:ally)?|ominous|eerie|gloomy|sinister|foreboding|haunting|menacing|noir|chiaroscuro|cinematic|volumetric|glaring|blinding|brooding|bleak|oppressive|stark(?:ly)?)\b/gi, "plain");
+}
+
 export function addHandSkin(text: string): string {
   if (/pure flat white skin/i.test(text)) return text;
   return text.replace(BODY_PART_AFTER_YOU, (match) => `${match} ${HAND_SKIN}`);
@@ -42,17 +55,11 @@ export function tagCast(prompt: string, cast: string[]): string {
   let text = (prompt ?? "").trim();
   for (const name of cast) {
     if (!name) continue;
-    const tagged = new RegExp(`@${escape(name)}(?![\\p{L}\\p{N}])`, "iu");
     if (eqName(name, "You")) {
-      if (tagged.test(text)) {
-        text = text.replace(new RegExp(`@you(?![\\p{L}\\p{N}])`, "giu"), "@You");
-        continue;
-      }
-      if (/(?<![@\p{L}])your(?![\p{L}])/iu.test(text)) {
-        text = text.replace(/(?<![@\p{L}])your(?![\p{L}])/iu, "@You's");
-      } else if (/(?<![@\p{L}])you(?![\p{L}'’])/iu.test(text)) {
-        text = text.replace(/(?<![@\p{L}])you(?![\p{L}'’])/iu, "@You");
-      }
+      // Luôn gắn nốt you/your còn sót, kể cả khi đã có @You (tránh "toward your 35th birthday").
+      text = text.replace(new RegExp(`@you(?![\\p{L}\\p{N}])`, "giu"), "@You");
+      text = text.replace(/(?<![@\p{L}])your(?![\p{L}])/giu, "@You's");
+      text = text.replace(/(?<![@\p{L}])you(?![\p{L}'’])/giu, "@You");
       continue;
     }
     const bare = new RegExp(`(?<![@\\p{L}\\p{N}])${escape(name)}(?![\\p{L}\\p{N}])`, "giu");

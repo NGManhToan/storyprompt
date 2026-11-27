@@ -72,9 +72,9 @@ test("empty drop, clipboard, edit survival, clear, style, nav, theme", async ({ 
   await expect.poll(async () => page.evaluate(() => navigator.clipboard.readText())).toContain("Clipboard sentence");
 
   await page.locator("#style").selectOption("webtoon");
-  await expect.poll(async () => page.evaluate(() => localStorage.getItem("storyprompt.settings.v2") || "")).toContain("webtoon");
+  await expect.poll(async () => page.evaluate(() => localStorage.getItem("storyprompt.settings.v4") || localStorage.getItem("storyprompt.settings.v3") || localStorage.getItem("storyprompt.settings.v2") || "")).toContain("webtoon");
 
-  await page.getByTitle("Báo cáo").click();
+  await page.getByRole("button", { name: "Báo cáo" }).click();
   await expect(page.getByRole("heading", { name: "Báo cáo" })).toBeVisible();
   await page.getByRole("button", { name: "Đóng ×" }).click();
   await page.getByTitle("Cài đặt").click();
@@ -106,6 +106,7 @@ test("autosave states, reload restore, and dismiss", async ({ page }) => {
   await expect(page.locator(".saved")).toContainText("Đã lưu", { timeout: 8_000 });
 
   await page.reload();
+  await dropSrt(page, "save-one.srt");
   await expect(page.locator(".restore")).toBeVisible();
   const banner = await page.evaluate(() => {
     const root = document.querySelector(".restore")!;
@@ -124,6 +125,7 @@ test("autosave states, reload restore, and dismiss", async ({ page }) => {
   await expect(page.locator("#prompt")).toHaveValue("Saved prompt that must come back after reload.");
 
   await page.reload();
+  await dropSrt(page, "save-one.srt");
   await expect(page.locator(".restore")).toBeVisible();
   await page.getByRole("button", { name: "Bỏ" }).click();
   await expect(page.locator(".restore")).toHaveCount(0);
@@ -175,6 +177,8 @@ test("invalid generate body does not wipe the prompt", async ({ page }) => {
 });
 
 test("visual fidelity and viewport shots", async ({ page }) => {
+  // So khớp layout với app tham chiếu trên 47311 và ghi ảnh vào /opt/cursor — chỉ có trên CI Linux.
+  if (process.platform === "win32") test.skip();
   await mkdir("/opt/cursor/artifacts", { recursive: true });
   const viewports = [
     [1920, 1080],

@@ -38,7 +38,7 @@ App gốc cắt phụ đề thành cảnh khoảng 8 giây, gửi cả kịch b�
 
 - Cắt **theo tiêu đề cảnh** khi file có `CẢNH` / `INT` / `EXT`. Nếu chỉ là phụ đề thoại: **cố định 4–12 giây** (mặc định 8) hoặc **cụm nghĩa**. TXT cắt theo dòng hoặc theo câu.
 - Ô kịch bản gốc, chủ đề, tên người kể. Bật mặc định «Gửi toàn bộ kịch bản trong mỗi lô» (cắt ở 20.000 ký tự nếu quá dài).
-- Lô mặc định 4. Nhiệt độ lượt đầu 0.7, lần viết lại 0.2. Model Gemini vẫn là `gemini-3.1-flash-lite`, rồi `gemini-3.8-flash`, rồi `gemini-flash-latest` khi model không tồn tại.
+- Lô mặc định 4. Nhiệt độ lượt đầu 0.7, lần viết lại 0.2. Model Gemini theo chuỗi của AI Studio: `gemini-3.1-flash-lite`, rồi `gemini-4-hydrogen` (xem `docs/FAST_FREE_PIPELINE.md`).
 - Groq mặc định `qwen/qwen3.8-27b`, cùng họ model với làn chất lượng trong kế hoạch. Cloudflare vẫn nhập model tay.
 - Mỗi cảnh có thêm góc máy, thứ tự shot và hành động ngắn. Xuất thêm `TXT số` (`1_prompt`) và CSV, bên cạnh gói Flow.
 - Quá tải 503 không tự nhảy sang model khác. 429 chờ đúng hạn mức của model đang chạy.
@@ -63,7 +63,7 @@ Mặc định thận trọng, sửa trong Cài đặt cho đúng hạn mức kh�
 
 Với 211 cảnh, lô 6 là khoảng 36 request cho lượt đầu, cộng thêm các cảnh bị loại. Ở 15 RPM, sàn thời gian khoảng vài phút, chưa tính độ trễ và lần viết lại. Ứng dụng không hứa một con số. Báo cáo sau mỗi lượt ghi thời gian tường, token, tỉ lệ đạt và lý do loại.
 
-Model Gemini mặc định: `gemini-3.1-flash-lite`, rồi `gemini-3.8-flash`, rồi `gemini-flash-latest` nếu model trước trả 404. Nếu AI Studio đổi tên, dán đúng id vào ô model.
+Model Gemini mặc định: `gemini-3.1-flash-lite`, rồi `gemini-4-hydrogen` (giống app AI Studio). Model đã nghỉ hưu (`gemini-2.*`, `gemini-3.5-flash-lite`, `gemini-flash-latest`…) tự bị lọc. Lỗi 429 cho model nghỉ 5 phút, 503 nghỉ 2 phút, 404 nghỉ 60 phút; lúc đó lô chuyển sang Groq/Cloudflare nếu có khóa.
 
 ## Lane
 
@@ -97,7 +97,7 @@ Hoặc:
 
 ```bash
 npm run build
-NODE_ENV=production npm start
+npm start   # chạy được cả Windows PowerShell; tương đương tsx server.ts --production
 ```
 
 Cloud Run:
@@ -110,7 +110,7 @@ Server đọc `PORT`. Khóa trong header của request chỉ dùng cho request �
 
 ### Google AI Studio
 
-App là Vite + React và `server.ts` (Node, `@google/genai` trên server, REST dự phòng). Chạy bằng `npm run dev` hoặc `npm start`. AI Studio inject `GEMINI_API_KEY`; health check sẽ báo Gemini sẵn và giao diện gọi `/api/generate` từng lô.
+App là Vite + React và `server.ts` (Node, gọi REST Gemini có stream + chuỗi dự phòng). Server tự nạp `.env.local` rồi `.env` (không ghi đè biến môi trường có sẵn). Chạy bằng `npm run dev` hoặc `npm start`. AI Studio inject `GEMINI_API_KEY`; health check sẽ báo Gemini sẵn và giao diện gọi `/api/generate` từng lô.
 
 ## Kiểm thử
 

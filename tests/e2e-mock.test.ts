@@ -53,7 +53,7 @@ describe("mocked 20-scene run", () => {
     expect(output.report.wallTimeMs).toBeGreaterThanOrEqual(0);
     expect(output.report.wallTimeMs).toBeLessThan(30_000);
     expect(output.report.requests).toBe(provider.calls.length);
-    expect(provider.calls.filter((call) => call.kind === "scenes").length).toBe(7);
+    expect(provider.calls.filter((call) => call.kind === "scenes").length).toBe(6); // cảnh lỗi được gom lại 1 lô retry thay vì từng cảnh
     const widest = Math.max(...provider.calls.map((call) => call.sceneIds.length));
     expect(widest).toBeLessThanOrEqual(4);
     expect(provider.calls.some((call) => call.sceneIds.length === 20)).toBe(false);

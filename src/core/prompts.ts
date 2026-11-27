@@ -42,12 +42,38 @@ export const SCENE_RESPONSE_SCHEMA: Record<string, unknown> = {
  * Schema riêng cho từng lô: đúng N hàng (minItems = maxItems = N) và scene_id chỉ được là các id của lô.
  * Gemini structured output hỗ trợ minItems/maxItems/enum (không hỗ trợ uniqueItems), nên trùng id vẫn phải lọc ở pipeline.
  */
+/**
+ * Gemini từ chối schema có quá nhiều trạng thái ("too many states for serving") khi lô lớn có cả enum id
+ * lẫn minItems/maxItems (đo 27/11: lô 44 cảnh bị 400, lô 20 cảnh qua). Trên ngưỡng này bỏ các ràng buộc đó;
+ * validator vẫn bắt id lạ, trùng và thiếu nên chất lượng prompt không đổi.
+ */
+export const STRICT_SCHEMA_MAX_IDS = 24;
+
+/** Bỏ enum/minItems/maxItems khỏi schema cảnh (dùng khi lô lớn hoặc khi nhà cung cấp kêu schema quá phức tạp). */
+export function relaxSceneSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const base = schema as { properties?: { scenes?: { items?: { properties?: Record<string, unknown> } & Record<string, unknown> } & Record<string, unknown> } } & Record<string, unknown>;
+  const scenes = base.properties?.scenes;
+  if (!scenes?.items?.properties) return schema;
+  const { minItems: _min, maxItems: _max, ...rest } = scenes as Record<string, unknown>;
+  return {
+    ...base,
+    properties: {
+      ...base.properties,
+      scenes: {
+        ...rest,
+        items: { ...scenes.items, properties: { ...scenes.items.properties, scene_id: { type: "string" } } },
+      },
+    },
+  };
+}
+
 export function sceneSchemaFor(sceneIds: string[]): Record<string, unknown> {
   const base = SCENE_RESPONSE_SCHEMA as {
     properties: { scenes: { items: { properties: Record<string, unknown> } & Record<string, unknown> } & Record<string, unknown> };
   } & Record<string, unknown>;
   const items = base.properties.scenes.items;
   const ids = [...new Set(sceneIds)];
+  if (ids.length > STRICT_SCHEMA_MAX_IDS) return relaxSceneSchema(base);
   return {
     ...base,
     properties: {

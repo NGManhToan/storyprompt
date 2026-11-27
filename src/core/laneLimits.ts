@@ -34,6 +34,11 @@ export const CF_NEURONS_PER_M: Record<string, { input: number; output: number }>
   "@cf/qwen/qwen3-30b-a3b-fp8": { input: 4_625, output: 30_475 },
   "@cf/meta/llama-4-scout-17b-16e-instruct": { input: 24_545, output: 77_273 },
   "@cf/zai-org/glm-4.7-flash": { input: 5_500, output: 36_400 },
+  // Đọc từ API catalog Workers AI ngày 27/11/2026 (USD/M token ÷ 0,011 USD/1.000 neuron).
+  "@cf/google/gemma-4-26b-a4b-it": { input: 9_091, output: 27_273 },
+  "@cf/mistralai/mistral-small-3.1-24b-instruct": { input: 31_909, output: 50_455 },
+  "@cf/aisingapore/gemma-sea-lion-v4-27b-it": { input: 31_909, output: 50_455 },
+  "@cf/deepseek-ai/deepseek-v4.1-flash-1017": { input: 27_273, output: 109_091 },
 };
 
 const CF_FALLBACK_PRICE = { input: 40_909, output: 290_909 };

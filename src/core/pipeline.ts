@@ -30,6 +30,11 @@ import type {
 import { clamp, emptyResult } from "./types.js";
 import { canonSceneId, repairEnding, retryFeedback, validateDraft, visualKey } from "./validators.js";
 
+/** Lô lớn nhất: free tier giới hạn theo SỐ REQUEST (RPM/RPD), nên ít request lớn có lợi hơn nhiều request nhỏ. */
+export const MAX_BATCH = 48;
+/** Lượt sửa gom tối đa chừng này cảnh/lô để phản hồi lỗi từng cảnh vẫn rõ. */
+export const RETRY_BATCH = 12;
+
 export type Checkpoint = {
   id: string;
   fileName: string;
@@ -152,7 +157,7 @@ export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
   let bible = input.bible ?? undefined;
   let fatal: string | undefined;
   let cancelled = false;
-  const batchSize = clamp(input.settings.batchSize, 4, 8);
+  const batchSize = clamp(input.settings.batchSize, 1, MAX_BATCH);
   const concurrency = clamp(input.settings.concurrency, 1, 12);
   const slots: LaneSlot[] =
     input.slots ??
@@ -243,7 +248,8 @@ export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
       return row.attempts < maxAttempts;
     });
     if (!queue.length) break;
-    const size = attempt === 1 ? batchSize : 1;
+    // Lượt sửa cũng gom lô (trước đây mỗi cảnh một request → 104 request lẻ trong lượt 176 cảnh, đốt RPM free tier).
+    const size = attempt === 1 ? batchSize : Math.min(batchSize, RETRY_BATCH);
     await pool(chunk(queue, size), concurrency, async (batch) => {
       if (fatal || cancelled || input.signal?.aborted) {
         cancelled = cancelled || Boolean(input.signal?.aborted);

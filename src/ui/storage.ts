@@ -39,7 +39,8 @@ export const defaultSettings: Settings = {
   geminiFallbacks: "gemini-4-hydrogen",
   groqModel: "qwen/qwen3.8-27b",
   cfModel: "@cf/qwen/qwen3.8-27b",
-  batchSize: 4,
+  // Đo 27/11: 176 cảnh, lô 44, Gemini flash-lite = 9 request, 35 s, 176/176 đạt (lô 4 cũ: 167 request, 2.041 s).
+  batchSize: 44,
   concurrency: 6,
   rpm: DEFAULT_LIMITS.gemini.rpm,
   tpm: DEFAULT_LIMITS.gemini.tpm,
@@ -54,7 +55,8 @@ export const defaultSettings: Settings = {
   cfRpm: DEFAULT_LIMITS.cloudflare.rpm,
   cfNeuronStop: DEFAULT_LIMITS.cloudflare.neuronStop ?? 9_000,
   maxAttempts: 3,
-  maxOutputTokens: 8192,
+  // Lô 44 đo được tới 7.486 token output; 8192 cũ sát trần → nâng để không bị cắt cụt.
+  maxOutputTokens: 16384,
   bible: false,
   temperature: 0.7,
   fullScript: true,
@@ -82,6 +84,9 @@ export function migrateSettings(raw: LegacyShape): Settings {
   const merged = { ...defaultSettings, ...rest } as Settings;
   if (!Array.isArray(raw.keys)) merged.keys = keysFromLegacy({ geminiKey, groqKey, cfToken, cfAccount });
   if (!Array.isArray(merged.serverOff)) merged.serverOff = [];
+  // Lô ≤ 8 là mặc định cũ (nguyên nhân chính của 160+ request); đưa về lô lớn đã đo.
+  if (!Number.isFinite(merged.batchSize) || merged.batchSize <= 8) merged.batchSize = defaultSettings.batchSize;
+  if (merged.maxOutputTokens === 8192) merged.maxOutputTokens = defaultSettings.maxOutputTokens;
   return merged;
 }
 

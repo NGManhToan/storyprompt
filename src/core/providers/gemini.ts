@@ -1,4 +1,5 @@
 import { parseRetryAfter, ProviderError } from "../errors.js";
+import { relaxSceneSchema } from "../prompts.js";
 import { buildGeminiBody } from "../prompts.js";
 import type { GenerateRequest, GenerateResponse, ProviderLane } from "../types.js";
 
@@ -81,8 +82,24 @@ type GeminiChunk = {
   error?: { code?: number; message?: string; status?: string };
 };
 
+/** Thời gian chờ Google gợi ý trong lỗi 429: RetryInfo.retryDelay ("23s") hoặc câu "Please retry in 23.4s". */
+export function geminiRetryDelayMs(raw: string): number | undefined {
+  const detail = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(raw);
+  if (detail) return Math.ceil(Number(detail[1]) * 1000);
+  const sentence = /retry in (\d+(?:\.\d+)?)\s*(ms|s)\b/i.exec(raw);
+  if (sentence) return Math.ceil(Number(sentence[1]) * (sentence[2].toLowerCase() === "ms" ? 1 : 1000));
+  return undefined;
+}
+
+/** Hạn mức bị chạm là theo phút hay theo ngày (QuotaFailure.quotaId, vd. GenerateRequestsPerMinutePerProjectPerModel-FreeTier). */
+export function geminiQuotaWindow(raw: string): "minute" | "day" | undefined {
+  if (/PerDay/i.test(raw)) return "day";
+  if (/PerMinute/i.test(raw)) return "minute";
+  return undefined;
+}
+
 async function readError(response: Response): Promise<ProviderError> {
-  const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"));
+  let retryAfterMs = parseRetryAfter(response.headers.get("retry-after"));
   let message = `gemini HTTP ${response.status}`;
   const raw = await response.text().catch(() => "");
   try {
@@ -92,7 +109,24 @@ async function readError(response: Response): Promise<ProviderError> {
   } catch {
     if (raw) message = `${message} ${raw}`.trim();
   }
+  if (response.status === 429) {
+    retryAfterMs = retryAfterMs ?? geminiRetryDelayMs(raw);
+    const window = geminiQuotaWindow(raw);
+    // Đặt nhãn ở đầu để không bị cắt mất khi rút gọn thông báo.
+    if (window) message = `[quota/${window === "day" ? "ngày" : "phút"}] ${message}`;
+  }
   return new ProviderError(message.slice(0, 400), { status: response.status, lane: "gemini", retryAfterMs });
+}
+
+/**
+ * Thời gian nghỉ cho model sau 429: hạn mức phút → theo retryDelay Google gợi ý (thường < 60 s),
+ * hạn mức ngày → 60 phút, không rõ → 5 phút như AI Studio.
+ */
+export function rateLimitCooldownMs(error: ProviderError): number {
+  if (/\[quota\/ngày\]/.test(error.message)) return COOLDOWN_MS.missing;
+  if (error.retryAfterMs !== undefined) return Math.min(COOLDOWN_MS.rateLimited, Math.max(1_000, error.retryAfterMs + 500));
+  if (/\[quota\/phút\]/.test(error.message)) return 60_000;
+  return COOLDOWN_MS.rateLimited;
 }
 
 export type GeminiFailure = "auth" | "missing" | "rateLimited" | "unavailable" | "badRequest" | "abort";
@@ -314,9 +348,15 @@ export async function generateGeminiRest(options: {
             : new ProviderError(error instanceof Error ? error.message : "Gemini lỗi.", { status: 502, lane: "gemini" });
         last = providerError;
         if (kind === "auth") throw providerError;
+        if (kind === "badRequest" && /too many states|schema/i.test(providerError.message) && options.request.kind === "scenes") {
+          const loose = relaxSceneSchema(options.request.responseSchema);
+          if (JSON.stringify(loose) === JSON.stringify(options.request.responseSchema)) throw providerError;
+          // Schema quá phức tạp cho Gemini: thử lại ngay một lần với schema nới (validator vẫn kiểm id).
+          return generateGeminiRest({ ...options, request: { ...options.request, responseSchema: loose } });
+        }
         if (kind === "badRequest") throw providerError;
         if (kind === "missing") breaker.mark(model, COOLDOWN_MS.missing);
-        else if (kind === "rateLimited") breaker.mark(model, Math.max(COOLDOWN_MS.rateLimited, providerError.retryAfterMs ?? 0));
+        else if (kind === "rateLimited") breaker.mark(model, rateLimitCooldownMs(providerError));
         else {
           breaker.mark(model, COOLDOWN_MS.unavailable);
           transient.add(model);

@@ -592,7 +592,7 @@ function SettingsDrawer({ studio, onClose }: { studio: ReturnType<typeof useStud
           <label>Dừng ở neuron/ngày<input type="number" min={100} max={10000} value={settings.cfNeuronStop} onChange={(event) => set({ ...settings, cfNeuronStop: Number(event.target.value) })} /></label>
         </div>
         <div className="split">
-          <label>Lô {settings.batchSize}<input type="range" min={4} max={8} value={settings.batchSize} onChange={(event) => set({ ...settings, batchSize: Number(event.target.value) })} /></label>
+          <label>Lô {settings.batchSize}<input type="range" min={4} max={48} step={4} value={settings.batchSize} onChange={(event) => set({ ...settings, batchSize: Number(event.target.value) })} /></label>
           <label>Luồng {settings.concurrency}<input type="range" min={1} max={12} value={settings.concurrency} onChange={(event) => set({ ...settings, concurrency: Number(event.target.value) })} /></label>
         </div>
         <label>Hậu tố<textarea rows={2} value={settings.footer} onChange={(event) => set({ ...settings, footer: event.target.value })} /></label>

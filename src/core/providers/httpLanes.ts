@@ -111,9 +111,17 @@ export async function generateGroq(options: {
   };
 }
 
-export function cfReasoning(model: string): Record<string, unknown> {
-  // qwen3.8-27b trên Workers AI chỉ nhận low/medium/xhigh (mặc định xhigh) — đặt low để giữ neuron.
-  if (/qwen3\.8|gpt-oss/i.test(model)) return { reasoning_effort: "low" };
+/**
+ * Model suy luận trên Workers AI (qwen3.8, gemma-4, glm…) mặc định "nghĩ" trước khi trả lời và ăn hết max_tokens
+ * (đo 27/11: 24/24 request qwen3.8 finish_reason=length, 0 hàng). Schema Workers AI cho các model này có
+ * chat_template_kwargs.enable_thinking → tắt suy luận, cùng cách lane Groq đang làm với qwen.
+ * gpt-oss không tắt được, chỉ hạ reasoning_effort.
+ */
+export function cfReasoning(model: string, thinking = false): Record<string, unknown> {
+  if (/gpt-oss/i.test(model)) return { reasoning_effort: "low" };
+  if (/qwen3|gemma-4|glm-|deepseek-v4|inkling/i.test(model)) {
+    return thinking ? { reasoning_effort: /qwen3\.8/i.test(model) ? "low" : undefined } : { chat_template_kwargs: { enable_thinking: false } };
+  }
   return {};
 }
 

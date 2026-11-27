@@ -529,7 +529,21 @@ function ReportDialog({ studio, counts, onClose }: { studio: ReturnType<typeof u
           <>
             <p>{studio.lastMode === "mock" ? "Báo cáo mô phỏng." : "Báo cáo lượt chạy."}</p>
             <p>Đạt {counts.pct}% · {report.requests} request · {report.rejectionEvents} lần loại</p>
-            <p>{report.tokens.total.toLocaleString("vi-VN")} token</p>
+            <p>{report.tokens.total.toLocaleString("vi-VN")} token · {Math.round(report.wallTimeMs / 1000)} giây</p>
+            {report.telemetry ? (
+              <>
+                <p>Hàng model trả: {report.telemetry.rowsReturned} · nhận {report.telemetry.rowsAccepted} ({report.telemetry.rowAcceptancePct}%) · cắt cụt {report.telemetry.truncatedResponses} · trùng {report.telemetry.duplicateRows} · tự thêm dấu chấm {report.telemetry.autoFixedEndings}</p>
+                <p>{report.telemetry.outputTokensPerAccepted} token output / cảnh đạt{report.telemetry.neurons ? ` · ${report.telemetry.neurons} neuron Cloudflare` : ""}</p>
+                <ul>
+                  {Object.entries(report.telemetry.byLane).map(([lane, row]) => (
+                    <li key={lane}>{lane}: {row.ok}/{row.requests} request ổn · {row.rateLimited} lần 429 · nhận {row.rowsAccepted}/{row.rowsReturned} hàng</li>
+                  ))}
+                </ul>
+                {Object.keys(report.rejectionsByReason).length ? (
+                  <p>Lý do loại: {Object.entries(report.rejectionsByReason).map(([code, n]) => `${code} ${n}`).join(" · ")}</p>
+                ) : null}
+              </>
+            ) : null}
           </>
         )}
       </dialog>
@@ -545,26 +559,43 @@ function SettingsDrawer({ studio, onClose }: { studio: ReturnType<typeof useStud
       <aside className="drawer" role="dialog" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
         <div className="editor-head"><h2 id="settings-title">Cài đặt</h2><button type="button" onClick={onClose}>Đóng</button></div>
         <p>Khóa chỉ nằm trên trình duyệt này.</p>
-        <label>Lane<select value={settings.lane} onChange={(event) => set({ ...settings, lane: event.target.value as typeof settings.lane })}><option value="gemini">Gemini</option><option value="groq">Groq</option><option value="cloudflare">Cloudflare</option></select></label>
+        <label>Lane ưu tiên<select value={settings.lane} onChange={(event) => set({ ...settings, lane: event.target.value as typeof settings.lane })}><option value="gemini">Gemini</option><option value="groq">Groq</option><option value="cloudflare">Cloudflare</option></select></label>
+        <p>Hàng đợi chung: lô nào gặp lane đang rảnh thì chạy lane đó. Lane hết hạn mức hoặc lỗi sẽ tự nghỉ.</p>
+        <div className="split">
+          <label className="switch"><input type="checkbox" checked={settings.useGemini} onChange={(event) => set({ ...settings, useGemini: event.target.checked })} /><span>Gemini</span></label>
+          <label className="switch"><input type="checkbox" checked={settings.useGroq} onChange={(event) => set({ ...settings, useGroq: event.target.checked })} /><span>Groq</span></label>
+          <label className="switch"><input type="checkbox" checked={settings.useCloudflare} onChange={(event) => set({ ...settings, useCloudflare: event.target.checked })} /><span>Cloudflare</span></label>
+        </div>
         <label className="switch"><input type="checkbox" checked={settings.directBrowser} onChange={(event) => set({ ...settings, directBrowser: event.target.checked })} /><span>Gọi Gemini trực tiếp</span></label>
-        <label className="switch"><input type="checkbox" checked={settings.fullScript !== false} onChange={(event) => set({ ...settings, fullScript: event.target.checked })} /><span>Gửi cả kịch bản mỗi lô</span></label>
+        <label className="switch"><input type="checkbox" checked={settings.fullScript !== false} onChange={(event) => set({ ...settings, fullScript: event.target.checked })} /><span>Gửi ngữ cảnh lân cận (±{settings.contextScenes ?? 4} cảnh)</span></label>
         <label className="switch"><input type="checkbox" checked={settings.bible} onChange={(event) => set({ ...settings, bible: event.target.checked })} /><span>Story bible</span></label>
         <label>Gemini API key<input type="password" autoComplete="off" value={settings.geminiKey} onChange={(event) => set({ ...settings, geminiKey: event.target.value })} /></label>
         <label>Model Gemini<input value={settings.geminiModel} onChange={(event) => set({ ...settings, geminiModel: event.target.value })} /></label>
         <label>Model dự phòng<input value={settings.geminiFallbacks} onChange={(event) => set({ ...settings, geminiFallbacks: event.target.value })} /></label>
+        <div className="split">
+          <label>Gemini RPM<input type="number" min={1} value={settings.rpm} onChange={(event) => set({ ...settings, rpm: Number(event.target.value) })} /></label>
+          <label>TPM (input)<input type="number" min={1} value={settings.tpm} onChange={(event) => set({ ...settings, tpm: Number(event.target.value) })} /></label>
+          <label>RPD<input type="number" min={1} value={settings.rpd} onChange={(event) => set({ ...settings, rpd: Number(event.target.value) })} /></label>
+        </div>
+        <p>Google không công bố số free tier; xem AI Studio → Rate limits và chỉnh cho khớp.</p>
         <label>Groq API key<input type="password" autoComplete="off" value={settings.groqKey} onChange={(event) => set({ ...settings, groqKey: event.target.value })} /></label>
         <label>Model Groq<input value={settings.groqModel} onChange={(event) => set({ ...settings, groqModel: event.target.value })} /></label>
+        <div className="split">
+          <label>Groq RPM<input type="number" min={1} value={settings.groqRpm} onChange={(event) => set({ ...settings, groqRpm: Number(event.target.value) })} /></label>
+          <label>TPM<input type="number" min={1} value={settings.groqTpm} onChange={(event) => set({ ...settings, groqTpm: Number(event.target.value) })} /></label>
+          <label>OTPM<input type="number" min={1} value={settings.groqOtpm} onChange={(event) => set({ ...settings, groqOtpm: Number(event.target.value) })} /></label>
+          <label>RPD<input type="number" min={1} value={settings.groqRpd} onChange={(event) => set({ ...settings, groqRpd: Number(event.target.value) })} /></label>
+        </div>
         <label>Cloudflare account id<input value={settings.cfAccount} onChange={(event) => set({ ...settings, cfAccount: event.target.value })} /></label>
         <label>Cloudflare API token<input type="password" autoComplete="off" value={settings.cfToken} onChange={(event) => set({ ...settings, cfToken: event.target.value })} /></label>
         <label>Model Cloudflare<input value={settings.cfModel} onChange={(event) => set({ ...settings, cfModel: event.target.value })} /></label>
         <div className="split">
-          <label>Lô {settings.batchSize}<input type="range" min={4} max={8} value={settings.batchSize} onChange={(event) => set({ ...settings, batchSize: Number(event.target.value) })} /></label>
-          <label>Luồng {settings.concurrency}<input type="range" min={1} max={6} value={settings.concurrency} onChange={(event) => set({ ...settings, concurrency: Number(event.target.value) })} /></label>
+          <label>Cloudflare RPM<input type="number" min={1} value={settings.cfRpm} onChange={(event) => set({ ...settings, cfRpm: Number(event.target.value) })} /></label>
+          <label>Dừng ở neuron/ngày<input type="number" min={100} max={10000} value={settings.cfNeuronStop} onChange={(event) => set({ ...settings, cfNeuronStop: Number(event.target.value) })} /></label>
         </div>
         <div className="split">
-          <label>RPM<input type="number" min={1} value={settings.rpm} onChange={(event) => set({ ...settings, rpm: Number(event.target.value) })} /></label>
-          <label>TPM<input type="number" min={1} value={settings.tpm} onChange={(event) => set({ ...settings, tpm: Number(event.target.value) })} /></label>
-          <label>RPD<input type="number" min={1} value={settings.rpd} onChange={(event) => set({ ...settings, rpd: Number(event.target.value) })} /></label>
+          <label>Lô {settings.batchSize}<input type="range" min={4} max={8} value={settings.batchSize} onChange={(event) => set({ ...settings, batchSize: Number(event.target.value) })} /></label>
+          <label>Luồng {settings.concurrency}<input type="range" min={1} max={12} value={settings.concurrency} onChange={(event) => set({ ...settings, concurrency: Number(event.target.value) })} /></label>
         </div>
         <label>Hậu tố<textarea rows={2} value={settings.footer} onChange={(event) => set({ ...settings, footer: event.target.value })} /></label>
         <label>Tên thêm<input value={settings.extraNames} onChange={(event) => set({ ...settings, extraNames: event.target.value })} /></label>

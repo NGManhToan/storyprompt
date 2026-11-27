@@ -5,14 +5,26 @@ import { FatalRunError } from "../core/errors.js";
 import { toCopyText, toCsv, toFlowHandoff, toNumberedText } from "../core/export.js";
 import type { Checkpoint } from "../core/pipeline.js";
 import { runPipeline } from "../core/pipeline.js";
-import { createAbortableSleep, createScheduler, utcDay } from "../core/scheduler.js";
+import { createAbortableSleep, utcDay } from "../core/scheduler.js";
 import { parseSrt } from "../core/srt.js";
 import type { RequestLog, RunReport, Scene, SceneResult, StoryBible } from "../core/types.js";
 import { emptyResult, hashString } from "../core/types.js";
 import { pickAnchor } from "../core/providers/mock.js";
 import { validateDraft, visualKey } from "../core/validators.js";
-import { buildLanes, type ServerHealth } from "./lanes.js";
-import { loadCheckpoint, loadSettings, loadTheme, loadUsage, saveCheckpoint, saveSettings, saveTheme, saveUsage, type Settings } from "./storage.js";
+import { buildLanes, buildSlots, type ServerHealth } from "./lanes.js";
+import {
+  loadCheckpoint,
+  loadLaneUsage,
+  loadSettings,
+  loadTheme,
+  loadUsage,
+  saveCheckpoint,
+  saveLaneUsage,
+  saveSettings,
+  saveTheme,
+  saveUsage,
+  type Settings,
+} from "./storage.js";
 
 export type Phase = "idle" | "ready" | "running" | "done" | "error";
 
@@ -189,27 +201,24 @@ export function useStudio() {
     setStartedAt(Date.now());
     setLabel(mode === "mock" ? "Đang mô phỏng pipeline" : "Đang gửi lô đầu");
     const sleep = createAbortableSleep(controller.signal);
-    const day = loadUsage();
     try {
       const output = await runPipeline({
         scenes,
         knownNames,
         settings,
         lanes,
-        scheduler: createScheduler({
-          rpm: mode === "mock" ? 600 : settings.rpm,
-          tpm: mode === "mock" ? 2_000_000 : settings.tpm,
-          rpd: mode === "mock" ? 10_000 : settings.rpd,
-          dayCount: mode === "live" ? day.count : 0,
-          dayKey: day.dayKey,
+        slots: buildSlots(settings, lanes, {
+          mode,
           sleep,
-          onUsage:
-            mode === "live"
-              ? (next) => {
-                  saveUsage(next);
-                  setUsage(next);
-                }
-              : undefined,
+          usage: loadLaneUsage,
+          onUsage: (lane, next) => {
+            saveLaneUsage(lane, next);
+            if (lane === lanes[0]?.lane) {
+              const day = { dayKey: next.dayKey, count: next.count };
+              saveUsage(day);
+              setUsage(day);
+            }
+          },
         }),
         bible,
         prior: scope?.fresh ? [] : scope?.prior ?? results,

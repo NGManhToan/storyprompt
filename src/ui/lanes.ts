@@ -2,13 +2,17 @@ import { ProviderError, parseRetryAfter } from "../core/errors.js";
 import { geminiProvider } from "../core/providers/gemini.js";
 import { createMockProvider } from "../core/providers/mock.js";
 import type { GenerateRequest, GenerateResponse, Provider } from "../core/types.js";
-import type { Settings } from "./storage.js";
+import { cfNeurons } from "../core/laneLimits.js";
+import type { LaneSlot } from "../core/router.js";
+import { createScheduler } from "../core/scheduler.js";
+import type { LaneUsage, Settings } from "./storage.js";
 
 export type ServerHealth = {
   ok: boolean;
   gemini: boolean;
   groq: boolean;
   cloudflare: boolean;
+  models?: { gemini: string[]; groq: string; cloudflare: string };
 };
 
 function modelsOf(settings: Settings): string[] {
@@ -63,6 +67,12 @@ function proxyProvider(settings: Settings, lane: Settings["lane"], health: Serve
   };
 }
 
+const ENABLED: Record<Settings["lane"], keyof Settings> = {
+  gemini: "useGemini",
+  groq: "useGroq",
+  cloudflare: "useCloudflare",
+};
+
 export function buildLanes(settings: Settings, health: ServerHealth | null, mode: "mock" | "live"): Provider[] {
   if (mode === "mock") {
     return [createMockProvider({ delayMs: 220, fail: { "003": "language", "005": "omit" } })];
@@ -73,7 +83,7 @@ export function buildLanes(settings: Settings, health: ServerHealth | null, mode
     cloudflare: proxyProvider(settings, "cloudflare", health),
   };
   const direct =
-    settings.lane === "gemini" && settings.directBrowser && settings.geminiKey
+    settings.directBrowser && settings.geminiKey
       ? geminiProvider({ apiKey: settings.geminiKey, models: modelsOf(settings) })
       : null;
   const gemini: Provider = direct
@@ -97,7 +107,59 @@ export function buildLanes(settings: Settings, health: ServerHealth | null, mode
     .filter((lane) => {
       if (seen.has(lane)) return false;
       seen.add(lane);
-      return selected[lane].available;
+      return settings[ENABLED[lane]] !== false && selected[lane].available;
     })
     .map((lane) => selected[lane]);
+}
+
+/** Mỗi lane một bộ hạn mức riêng; router chia lô theo lane đang rảnh. */
+export function buildSlots(
+  settings: Settings,
+  lanes: Provider[],
+  options: {
+    now?: () => number;
+    sleep?: (ms: number) => Promise<void>;
+    mode: "mock" | "live";
+    usage: (lane: string) => LaneUsage;
+    onUsage: (lane: string, usage: LaneUsage) => void;
+  },
+): LaneSlot[] {
+  return lanes.map((provider) => {
+    const live = options.mode === "live";
+    const day = live ? options.usage(provider.lane) : { dayKey: new Date().toISOString().slice(0, 10), count: 0, neurons: 0 };
+    const common = {
+      now: options.now,
+      sleep: options.sleep,
+      dayKey: day.dayKey,
+      dayCount: day.count,
+      onUsage: live ? (next: LaneUsage) => options.onUsage(provider.lane, next) : undefined,
+    };
+    if (!live) {
+      return { provider, scheduler: createScheduler({ ...common, rpm: 600, tpm: 2_000_000, rpd: 10_000 }) };
+    }
+    if (provider.lane === "groq") {
+      return {
+        provider,
+        scheduler: createScheduler({ ...common, rpm: settings.groqRpm, tpm: settings.groqTpm, otpm: settings.groqOtpm, rpd: settings.groqRpd }),
+      };
+    }
+    if (provider.lane === "cloudflare") {
+      return {
+        provider,
+        neurons: (input: number, output: number) => cfNeurons(settings.cfModel, input, output),
+        scheduler: createScheduler({
+          ...common,
+          rpm: settings.cfRpm,
+          tpm: 10_000_000,
+          rpd: 100_000,
+          neuronStop: settings.cfNeuronStop,
+          neuronsUsed: day.neurons,
+        }),
+      };
+    }
+    return {
+      provider,
+      scheduler: createScheduler({ ...common, rpm: settings.rpm, tpm: settings.tpm, rpd: settings.rpd, tpmInputOnly: true }),
+    };
+  });
 }

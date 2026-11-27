@@ -1,4 +1,5 @@
 import type { Checkpoint } from "../core/pipeline.js";
+import { DEFAULT_LIMITS } from "../core/laneLimits.js";
 import type { RunSettings } from "../core/types.js";
 
 export type Settings = RunSettings & {
@@ -12,9 +13,19 @@ export type Settings = RunSettings & {
   cfAccount: string;
   cfToken: string;
   cfModel: string;
+  /** Hạn mức Gemini (free tier: số chưa công bố, xem AI Studio → Rate limits). */
   rpm: number;
   tpm: number;
   rpd: number;
+  useGemini: boolean;
+  useGroq: boolean;
+  useCloudflare: boolean;
+  groqRpm: number;
+  groqTpm: number;
+  groqOtpm: number;
+  groqRpd: number;
+  cfRpm: number;
+  cfNeuronStop: number;
   extraNames: string;
 };
 
@@ -23,22 +34,32 @@ export const defaultSettings: Settings = {
   directBrowser: true,
   geminiKey: "",
   geminiModel: "gemini-3.1-flash-lite",
-  geminiFallbacks: "gemini-3.8-flash, gemini-flash-latest",
+  geminiFallbacks: "gemini-4-hydrogen",
   groqKey: "",
   groqModel: "qwen/qwen3.8-27b",
   cfAccount: "",
   cfToken: "",
-  cfModel: "@cf/meta/llama-3.1-8b-instruct",
+  cfModel: "@cf/qwen/qwen3.8-27b",
   batchSize: 4,
-  concurrency: 4,
-  rpm: 15,
-  tpm: 250_000,
-  rpd: 500,
+  concurrency: 6,
+  rpm: DEFAULT_LIMITS.gemini.rpm,
+  tpm: DEFAULT_LIMITS.gemini.tpm,
+  rpd: DEFAULT_LIMITS.gemini.rpd,
+  useGemini: true,
+  useGroq: true,
+  useCloudflare: true,
+  groqRpm: DEFAULT_LIMITS.groq.rpm,
+  groqTpm: DEFAULT_LIMITS.groq.tpm,
+  groqOtpm: DEFAULT_LIMITS.groq.otpm ?? 1_000,
+  groqRpd: DEFAULT_LIMITS.groq.rpd,
+  cfRpm: DEFAULT_LIMITS.cloudflare.rpm,
+  cfNeuronStop: DEFAULT_LIMITS.cloudflare.neuronStop ?? 9_000,
   maxAttempts: 3,
   maxOutputTokens: 8192,
   bible: false,
   temperature: 0.7,
   fullScript: true,
+  contextScenes: 4,
   topic: "",
   protagonist: "",
   prefix: "",
@@ -46,7 +67,8 @@ export const defaultSettings: Settings = {
   extraNames: "",
 };
 
-const SETTINGS_KEY = "storyprompt.settings.v2";
+const SETTINGS_KEY = "storyprompt.settings.v3";
+const LEGACY_SETTINGS_KEY = "storyprompt.settings.v2";
 const THEME_KEY = "storyprompt.theme.v2";
 const USAGE_KEY = "storyprompt.usage.v1";
 
@@ -55,8 +77,25 @@ export type DayUsage = { dayKey: string; count: number };
 export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return defaultSettings;
-    return { ...defaultSettings, ...JSON.parse(raw) };
+    if (raw) return { ...defaultSettings, ...JSON.parse(raw) };
+    const legacy = localStorage.getItem(LEGACY_SETTINGS_KEY);
+    if (!legacy) return defaultSettings;
+    // v2 → v3: giữ khóa và tuỳ chỉnh nội dung, đổi model/hạn mức sang mặc định mới (chuỗi AI Studio).
+    const old = JSON.parse(legacy) as Partial<Settings>;
+    return {
+      ...defaultSettings,
+      geminiKey: old.geminiKey ?? "",
+      groqKey: old.groqKey ?? "",
+      cfAccount: old.cfAccount ?? "",
+      cfToken: old.cfToken ?? "",
+      directBrowser: old.directBrowser ?? defaultSettings.directBrowser,
+      bible: old.bible ?? defaultSettings.bible,
+      topic: old.topic ?? "",
+      protagonist: old.protagonist ?? "",
+      prefix: old.prefix ?? "",
+      footer: old.footer ?? defaultSettings.footer,
+      extraNames: old.extraNames ?? "",
+    };
   } catch {
     return defaultSettings;
   }
@@ -90,6 +129,32 @@ export function loadUsage(): DayUsage {
 
 export function saveUsage(usage: DayUsage) {
   localStorage.setItem(USAGE_KEY, JSON.stringify(usage));
+}
+
+export type LaneUsage = { dayKey: string; count: number; neurons: number };
+const LANE_USAGE_KEY = "storyprompt.laneUsage.v1";
+
+/** Đếm request/neuron theo lane trong ngày UTC (RPD và neuron Cloudflare reset 00:00 UTC). */
+export function loadLaneUsage(lane: string): LaneUsage {
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    const all = JSON.parse(localStorage.getItem(LANE_USAGE_KEY) || "{}") as Record<string, LaneUsage>;
+    const row = all[lane];
+    if (!row || row.dayKey !== today) return { dayKey: today, count: 0, neurons: 0 };
+    return { dayKey: row.dayKey, count: row.count ?? 0, neurons: row.neurons ?? 0 };
+  } catch {
+    return { dayKey: today, count: 0, neurons: 0 };
+  }
+}
+
+export function saveLaneUsage(lane: string, usage: LaneUsage) {
+  try {
+    const all = JSON.parse(localStorage.getItem(LANE_USAGE_KEY) || "{}") as Record<string, LaneUsage>;
+    all[lane] = usage;
+    localStorage.setItem(LANE_USAGE_KEY, JSON.stringify(all));
+  } catch {
+    /* bỏ qua */
+  }
 }
 
 const DB = "storyprompt-web";

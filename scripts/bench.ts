@@ -109,8 +109,13 @@ if (!slots.length) {
   process.exit(2);
 }
 
+// Chặn trước khi vượt hạn mức ngày của gói free (vd. Groq TPD 200K): dừng gọn khi tổng token chạm --stop-tokens.
+const stopTokens = Number(arg("stop-tokens", "0"));
+const controller = new AbortController();
+let spent = 0;
 let done = 0;
 const output = await runPipeline({
+  signal: controller.signal,
   scenes,
   knownNames,
   settings: { batchSize, concurrency, maxAttempts: 3, maxOutputTokens: 8192, bible: false, prefix: "", footer: "", fullScript: true, contextScenes: 4 },
@@ -120,6 +125,13 @@ const output = await runPipeline({
     if (event.type === "scene" && event.result.status === "accepted") {
       done += 1;
       if (done % 10 === 0) console.log(`[bench] accepted ${done}/${scenes.length}`);
+    }
+    if (event.type === "log") {
+      spent += event.log.totalTokens;
+      if (stopTokens && spent >= stopTokens && !controller.signal.aborted) {
+        console.log(`[bench] dừng: đã dùng ${spent} token (ngưỡng ${stopTokens}).`);
+        controller.abort();
+      }
     }
     if (event.type === "log" && event.log.status !== "ok") {
       console.log(`[bench] ${event.log.lane} ${event.log.status}: ${(event.log.error ?? "").slice(0, 160)}`);

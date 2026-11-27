@@ -282,6 +282,7 @@ export function buildSceneRequest(args: {
         : "",
     bibleBlock(args.bible),
     `Write exactly ${args.tasks.length} scene object(s), one per scene_id: ${args.tasks.map((task) => task.sceneId).join(", ")}. Never repeat a scene_id. Skip nothing.`,
+    "Each prompt: 30-40 English words (hard limit 28-42) — count before answering. Never show readable text, letters, labels or UI words in the image.",
     args.tasks.map(renderTask).join("\n\n"),
   ]
     .filter(Boolean)

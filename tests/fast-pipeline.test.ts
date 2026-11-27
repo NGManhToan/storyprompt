@@ -362,3 +362,16 @@ describe("validator: false positive từ live Groq-20", () => {
     expect(text).toContain("24 words");
   });
 });
+
+describe("overlayText bắt chữ trên màn hình", () => {
+  it("chặn 'showing the text … letters'", async () => {
+    const { validateDraft } = await import("../src/core/validators.js");
+    const task = { sceneId: "004", title: "t", source: "A crimson dialogue box flashes.", likelyPresent: [], neighbors: [] };
+    const draft = {
+      scene_id: "004", title: "t", environment: "desk", visible_cast: [], source_anchor: "A crimson dialogue box flashes.",
+      prompt: "A solid crimson dialogue box flashes across the laptop display, showing the text Access Denied in sharp white letters while gray morning light falls across the scratched oak desk.",
+    };
+    const verdict = validateDraft(draft, task, [], [], new Map());
+    expect(verdict.rejections.map((r) => r.code)).toContain("overlayText");
+  });
+});

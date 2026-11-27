@@ -24,7 +24,8 @@ const UNNAMED =
   /\b(?:a|an|the)\s+(?:man|woman|boy|girl|person|stranger|figure|guy|lady)\b|\b(?:someone|somebody|people|crowd)\b/i;
 const OVERLAY =
   /\b(?:subtitle|subtitles|caption|captions|watermark|title card|on-screen text|onscreen text|text overlay|chyron|lower third)\b/i;
-const READABLE = /\b(?:sign|letter|note|screen|page|banner)\b[^.]{0,48}\b(?:reads|says|reading)\b/i;
+const READABLE =
+  /\b(?:sign|letter|note|screen|page|banner)\b[^.]{0,48}\b(?:reads|says|reading)\b|\b(?:showing|displaying|reading|with|bearing)\s+the\s+(?:text|words?)\b|\bin\s+(?:\w+\s+){0,2}letters\b/i;
 const DANGLING =
   /\b(?:and|or|but|with|to|of|for|the|a|an|in|on|at|from|into|onto)\s*[.!?]$/i;
 

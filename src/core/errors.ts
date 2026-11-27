@@ -22,7 +22,7 @@ export class FatalRunError extends Error {
 }
 
 export class SchedulerError extends Error {
-  code: "rpm" | "tpm" | "rpd" | "stall";
+  code: "rpm" | "tpm" | "rpd" | "stall" | "otpm" | "budget";
 
   constructor(code: SchedulerError["code"], message: string) {
     super(message);

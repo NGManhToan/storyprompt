@@ -64,7 +64,7 @@ function isOffscreen(cue: string | undefined): boolean {
 
 /** Người chỉ nghe/nhận qua điện thoại, cuộc gọi, tin nhắn, email: không vào khung hình. */
 const REMOTE_CUE =
-  /\b(?:calls?|called|calling|voicemail|messages?|messaged|texts|texted|emails?|e-mail|speakerphone|on the line|hang(?:s|ing)? up|hung up|vibrates?|vibrated|video call|zoom|phone call|(?:on|over|into|via|by) (?:the |your |his |her |their )?(?:phone|cell|mobile|speaker)|(?:phone|cell) (?:rings|buzzes|lights up))\b/i;
+  /\b(?:calls?|called|calling|voicemail|messages?|messaged|texts|texted|emails?|e-mail|speakerphone|on the line|hang(?:s|ing)? up|hung up|vibrates?|vibrated|video call|zoom|phone call|(?:pick|picks|picked|answer|answers|answered) (?:up )?(?:the |your |his |her )?(?:phone|cell|mobile)|(?:on|over|into|via|by) (?:the |your |his |her |their )?(?:phone|cell|mobile|speaker)|(?:phone|cell) (?:rings|buzzes|lights up))\b/i;
 const SECOND_PERSON = /\b(?:you|your|you're|yourself)\b/i;
 /** "Your phone vibrates…": lời kể ngôi thứ hai nghĩa là You đang ở trong cảnh dù không có từ "You" đứng một mình. */
 const YOU_POSSESSIVE_LINE = /\b(?:your|you're|yourself)\b/i;

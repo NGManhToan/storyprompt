@@ -129,6 +129,10 @@ describe("AI Studio conventions", () => {
     expect(presence.mentionedOnly).toEqual(expect.arrayContaining(["Derek", "Chloe"]));
     // Derek tự hành động bên phía anh ta (không có You trong mệnh đề) vẫn được hiện.
     expect(inferPresence("Derek argues into his phone at his desk.", ROSTER).present).toContain("Derek");
+    // Cảnh 032 của file thử: không có chữ "call", chỉ "pick the phone back up and speak to".
+    const second = inferPresence("You pick the phone back up and speak directly to Derek and Chloe, telling both of them to keep their breathing steady,", ROSTER);
+    expect(second.present).toEqual(["You"]);
+    expect(second.mentionedOnly).toEqual(expect.arrayContaining(["Derek", "Chloe"]));
     const request = buildSceneRequest({ tasks: [task], knownNames: ROSTER, maxOutputTokens: 4096, temperature: 0.7 });
     expect(request.promptText).toContain("OFF-FRAME");
     expect(request.promptText).toContain("Derek");

@@ -27,6 +27,46 @@ const DANGLING =
 
 export type Verdict = { ok: boolean; rejections: Rejection[] };
 
+/**
+ * Sửa kết câu khi model chỉ quên dấu chấm (finish_reason = stop).
+ * Không sửa khi câu thật sự cụt: kết bằng dấu phẩy, dấu ba chấm hoặc từ nối — những trường hợp đó vẫn bị loại.
+ * Dữ liệu C# live-60: 70/72 lỗi "truncated" đến từ phản hồi finish_reason = stop, tức là báo nhầm.
+ */
+export function repairEnding(prompt: string): { prompt: string; fixed: boolean } {
+  const text = (prompt ?? "").replace(/\s+$/u, "");
+  if (!text) return { prompt: text, fixed: false };
+  if (/[.!?]["”’)]*$/.test(text)) return { prompt: text, fixed: false };
+  if (/(?:…|\.\.\.)$/.test(text) || /[,:;\-–—(]$/.test(text)) return { prompt: text, fixed: false };
+  if (/\b(?:and|or|but|with|to|of|for|the|a|an|in|on|at|from|into|onto|while|as)$/i.test(text)) {
+    return { prompt: text, fixed: false };
+  }
+  if (!/[\p{L}\p{N}"”’)]$/u.test(text)) return { prompt: text, fixed: false };
+  return { prompt: `${text}.`, fixed: true };
+}
+
+function looseNorm(value: string): string {
+  return value
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Tỷ lệ 3-gram từ của anchor có trong văn bản (0..1). */
+export function anchorCoverage(anchor: string, text: string): number {
+  const words = looseNorm(anchor).split(" ").filter(Boolean);
+  if (words.length < 3) return looseNorm(text).includes(looseNorm(anchor)) && words.length ? 1 : 0;
+  const haystack = ` ${looseNorm(text)} `;
+  let hit = 0;
+  let total = 0;
+  for (let index = 0; index <= words.length - 3; index += 1) {
+    total += 1;
+    if (haystack.includes(` ${words.slice(index, index + 3).join(" ")} `)) hit += 1;
+  }
+  return total ? hit / total : 0;
+}
+
 export function contentWords(text: string): string[] {
   return text
     .toLowerCase()
@@ -147,11 +187,12 @@ export function validateDraft(
   const borrow: string[] = [];
   const anchor = norm(draft.source_anchor ?? "");
   const source = norm(task.source);
-  if (anchor.length < 8 || !source.includes(anchor)) {
-    const fromNeighbor = task.neighbors.some((neighbor) => {
-      const text = norm(neighbor.source);
-      return anchor.length >= 8 && text.includes(anchor) && !source.includes(anchor);
-    });
+  // Cho phép model đổi dấu câu / ngoặc kép khi chép anchor; chỉ loại khi phần lớn anchor không thuộc cảnh này
+  // hoặc khớp cảnh bên cạnh tốt hơn.
+  const own = anchor.length >= 8 ? (source.includes(anchor) ? 1 : anchorCoverage(anchor, source)) : 0;
+  const best = Math.max(0, ...task.neighbors.map((neighbor) => anchorCoverage(anchor, neighbor.source)));
+  if (anchor.length < 8 || own < 0.8 || best > own) {
+    const fromNeighbor = anchor.length >= 8 && best > own && best >= 0.8;
     borrow.push(
       fromNeighbor
         ? "source_anchor chép từ cảnh bên cạnh."

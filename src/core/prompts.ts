@@ -1,3 +1,4 @@
+import { expectedOutput, outputBudget } from "./laneLimits.js";
 import type { GenerateRequest, SceneDraft, SceneTask, StoryBible } from "./types.js";
 
 export const SCENE_RESPONSE_SCHEMA: Record<string, unknown> = {
@@ -36,6 +37,34 @@ export const SCENE_RESPONSE_SCHEMA: Record<string, unknown> = {
   },
   required: ["scenes"],
 };
+
+/**
+ * Schema riêng cho từng lô: đúng N hàng (minItems = maxItems = N) và scene_id chỉ được là các id của lô.
+ * Gemini structured output hỗ trợ minItems/maxItems/enum (không hỗ trợ uniqueItems), nên trùng id vẫn phải lọc ở pipeline.
+ */
+export function sceneSchemaFor(sceneIds: string[]): Record<string, unknown> {
+  const base = SCENE_RESPONSE_SCHEMA as {
+    properties: { scenes: { items: { properties: Record<string, unknown> } & Record<string, unknown> } & Record<string, unknown> };
+  } & Record<string, unknown>;
+  const items = base.properties.scenes.items;
+  const ids = [...new Set(sceneIds)];
+  return {
+    ...base,
+    properties: {
+      scenes: {
+        ...base.properties.scenes,
+        ...(ids.length ? { minItems: ids.length, maxItems: ids.length } : {}),
+        items: {
+          ...items,
+          properties: {
+            ...items.properties,
+            scene_id: ids.length ? { type: "string", enum: ids } : { type: "string" },
+          },
+        },
+      },
+    },
+  };
+}
 
 export const BIBLE_RESPONSE_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -125,6 +154,10 @@ export function estimateTokens(systemText: string, promptText: string, maxOutput
   return Math.ceil((systemText.length + promptText.length) / 4) + Math.ceil(maxOutputTokens * 0.25);
 }
 
+export function estimateInputTokens(systemText: string, promptText: string): number {
+  return Math.ceil((systemText.length + promptText.length) / 3.6);
+}
+
 function bibleBlock(bible?: StoryBible | null): string {
   if (!bible) return "";
   const people = bible.characters
@@ -142,11 +175,19 @@ function bibleBlock(bible?: StoryBible | null): string {
   ].join("\n");
 }
 
+const NEIGHBOR_CHARS = 220;
+
+function brief(text: string, limit: number): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length <= limit ? clean : `${clean.slice(0, limit).replace(/\s+\S*$/, "")} …`;
+}
+
 function renderTask(task: SceneTask): string {
+  // Cảnh bên cạnh chỉ gửi tóm tắt ngắn: đủ để giữ không gian, không đủ chi tiết để model chép hành động.
   const neighbors = task.neighbors
     .map(
       (neighbor) =>
-        `### SCENE ${neighbor.sceneId}\nSTATUS: READ-ONLY NEIGHBOR. Do not depict this action, prop, or blocking.\nTITLE: ${neighbor.title}\nSOURCE:\n${neighbor.source}`,
+        `### SCENE ${neighbor.sceneId}\nSTATUS: READ-ONLY NEIGHBOR. Do not depict this action, prop, or blocking.\nTITLE: ${neighbor.title}\nGIST: ${brief(neighbor.source, NEIGHBOR_CHARS)}`,
     )
     .join("\n\n");
   return [
@@ -154,7 +195,7 @@ function renderTask(task: SceneTask): string {
     "STATUS: WRITE THIS SCENE ONLY",
     `TITLE: ${task.title}`,
     `LIKELY ON CAMERA (hint, confirm against the source): ${task.likelyPresent.join(", ") || "(no person)"}`,
-    "SOURCE:",
+    "SOURCE (only this text belongs to this scene; source_anchor must be copied verbatim from it):",
     task.source,
     task.feedback ? `PREVIOUS DRAFT REJECTED: ${task.feedback}` : "",
     neighbors ? `NEIGHBOR CONTEXT\n${neighbors}` : "",
@@ -164,11 +205,55 @@ function renderTask(task: SceneTask): string {
 }
 
 const MASTER_CAP = 20_000;
+/** Cửa sổ ngữ cảnh mặc định mỗi lô (ký tự). Trước đây gửi tới 20.000 ký tự master script mỗi lô. */
+export const CONTEXT_WINDOW_CAP = 3_600;
 
 export function clipMasterScript(text: string): { text: string; trimmed: boolean } {
   const clean = text.trim();
   if (clean.length <= MASTER_CAP) return { text: clean, trimmed: false };
   return { text: `${clean.slice(0, MASTER_CAP)}\n[master script trimmed for this request]`, trimmed: true };
+}
+
+/**
+ * Lấy đoạn master script quanh vị trí của lô thay vì gửi cả kịch bản.
+ * Tìm theo đoạn đầu lời thoại của cảnh đầu lô; nếu không thấy thì lấy theo tỷ lệ vị trí.
+ */
+export function windowMasterScript(
+  master: string,
+  probe: string,
+  position: number,
+  cap = CONTEXT_WINDOW_CAP,
+): string {
+  const clean = master.trim();
+  if (clean.length <= cap) return clean;
+  const needle = probe.replace(/\s+/g, " ").trim().slice(0, 40);
+  const flat = clean.replace(/\s+/g, " ");
+  let at = needle.length >= 12 ? flat.indexOf(needle) : -1;
+  if (at < 0) at = Math.round(Math.min(1, Math.max(0, position)) * flat.length);
+  const start = Math.max(0, Math.min(flat.length - cap, at - Math.round(cap * 0.35)));
+  const slice = flat.slice(start, start + cap);
+  return `${start > 0 ? "… " : ""}${slice}${start + cap < flat.length ? " …" : ""}`;
+}
+
+/** Cửa sổ ngữ cảnh theo cảnh: ±k cảnh quanh lô, mỗi cảnh một dòng tóm tắt. */
+export function sceneContextWindow(
+  scenes: { sceneId: string; title: string; source: string }[],
+  batchIds: string[],
+  k: number,
+  cap = CONTEXT_WINDOW_CAP,
+): string {
+  if (!scenes.length || !batchIds.length || k <= 0) return "";
+  const first = scenes.findIndex((scene) => scene.sceneId === batchIds[0]);
+  const last = scenes.findIndex((scene) => scene.sceneId === batchIds[batchIds.length - 1]);
+  if (first < 0 || last < 0) return "";
+  const ids = new Set(batchIds);
+  const rows = scenes
+    .slice(Math.max(0, first - k), Math.min(scenes.length, last + k + 1))
+    .filter((scene) => !ids.has(scene.sceneId))
+    .map((scene) => `[${scene.sceneId}] ${scene.title}: ${brief(scene.source, 160)}`);
+  let text = rows.join("\n");
+  if (text.length > cap) text = `${text.slice(0, cap)} …`;
+  return text;
 }
 
 export function buildSceneRequest(args: {
@@ -178,32 +263,45 @@ export function buildSceneRequest(args: {
   maxOutputTokens: number;
   temperature: number;
   masterScript?: string;
+  /** Cửa sổ ngữ cảnh đã cắt sẵn (ưu tiên hơn masterScript). */
+  contextWindow?: string;
   topic?: string;
   protagonist?: string;
 }): GenerateRequest {
   const systemText = systemForScenes(Boolean(args.bible));
   const master = args.masterScript?.trim() ? clipMasterScript(args.masterScript) : null;
+  const context = args.contextWindow?.trim();
   const promptText = [
     args.topic?.trim() ? `VIDEO TOPIC: ${args.topic.trim()}` : "",
     `ROSTER (names only, no appearance): ${args.knownNames.join(", ") || "(discover from the sources)"}`,
     args.protagonist?.trim() ? `PROTAGONIST NAME (locked token, no appearance): ${args.protagonist.trim()}` : "",
-    master ? `MASTER_SCRIPT (spatial anchor only. Do not depict actions from scenes you are not writing.):\n${master.text}` : "",
+    context
+      ? `STORY CONTEXT WINDOW (spatial anchor only. Do not depict actions from scenes you are not writing.):\n${context}`
+      : master
+        ? `MASTER_SCRIPT (spatial anchor only. Do not depict actions from scenes you are not writing.):\n${master.text}`
+        : "",
     bibleBlock(args.bible),
-    "Write every scene marked WRITE. Skip nothing.",
+    `Write exactly ${args.tasks.length} scene object(s), one per scene_id: ${args.tasks.map((task) => task.sceneId).join(", ")}. Never repeat a scene_id. Skip nothing.`,
     args.tasks.map(renderTask).join("\n\n"),
   ]
     .filter(Boolean)
     .join("\n\n");
+  const sceneIds = args.tasks.map((task) => task.sceneId);
+  const maxOutputTokens = outputBudget(sceneIds.length, args.maxOutputTokens);
+  const inputTokens = estimateInputTokens(systemText, promptText);
+  const outputTokens = expectedOutput(sceneIds.length);
   return {
     kind: "scenes",
     systemText,
     promptText,
-    responseSchema: SCENE_RESPONSE_SCHEMA,
-    maxOutputTokens: args.maxOutputTokens,
+    responseSchema: sceneSchemaFor(sceneIds),
+    maxOutputTokens,
     temperature: args.temperature,
-    sceneIds: args.tasks.map((task) => task.sceneId),
+    sceneIds,
     tasks: args.tasks,
-    estimatedTokens: estimateTokens(systemText, promptText, args.maxOutputTokens),
+    estimatedTokens: inputTokens + outputTokens,
+    estimatedInputTokens: inputTokens,
+    estimatedOutputTokens: outputTokens,
   };
 }
 
@@ -228,6 +326,8 @@ export function buildBibleRequest(args: {
     sceneIds: [],
     tasks: [],
     estimatedTokens: estimateTokens(systemText, promptText, args.maxOutputTokens),
+    estimatedInputTokens: estimateInputTokens(systemText, promptText),
+    estimatedOutputTokens: Math.ceil(args.maxOutputTokens * 0.5),
   };
 }
 
@@ -290,6 +390,46 @@ export function parseScenePayload(text: string): SceneDraft[] {
   });
 }
 
+/** Lấy các object hoàn chỉnh trong mảng "scenes" của một JSON bị cắt giữa chừng. */
+export function salvageScenes(text: string): SceneDraft[] {
+  const start = text.indexOf("[", Math.max(0, text.indexOf('"scenes"')));
+  if (start < 0) return [];
+  const rows: string[] = [];
+  let depth = 0;
+  let begin = -1;
+  let inString = false;
+  let escaped = false;
+  for (let index = start + 1; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === "{") {
+      if (depth === 0) begin = index;
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0 && begin >= 0) {
+        rows.push(text.slice(begin, index + 1));
+        begin = -1;
+      }
+    } else if (char === "]" && depth === 0) break;
+  }
+  const out: SceneDraft[] = [];
+  for (const row of rows) {
+    try {
+      out.push(...parseScenePayload(`{"scenes":[${row}]}`));
+    } catch {
+      /* bỏ hàng hỏng */
+    }
+  }
+  return out;
+}
+
 export function parseBiblePayload(text: string): StoryBible {
   const data = extractJson(text) as { characters?: unknown; locations?: unknown };
   const characters = Array.isArray(data.characters)
@@ -311,15 +451,20 @@ export function parseBiblePayload(text: string): StoryBible {
   return { characters, locations };
 }
 
-export function buildGeminiBody(request: GenerateRequest): Record<string, unknown> {
+/** Gemini 4.x dùng thinkingLevel; AI Studio đặt LOW và bỏ maxOutputTokens/temperature cho mọi model. */
+export function isThinkingGemini(model: string): boolean {
+  return /^gemini-4/i.test(model.trim());
+}
+
+export function buildGeminiBody(request: GenerateRequest, model = ""): Record<string, unknown> {
+  const generationConfig: Record<string, unknown> = {
+    responseMimeType: "application/json",
+    responseJsonSchema: request.responseSchema,
+  };
+  if (isThinkingGemini(model)) generationConfig.thinkingConfig = { thinkingLevel: "LOW" };
   return {
     contents: [{ role: "user", parts: [{ text: request.promptText }] }],
     systemInstruction: { parts: [{ text: request.systemText }] },
-    generationConfig: {
-      temperature: request.temperature,
-      maxOutputTokens: request.maxOutputTokens,
-      responseMimeType: "application/json",
-      responseSchema: request.responseSchema,
-    },
+    generationConfig,
   };
 }

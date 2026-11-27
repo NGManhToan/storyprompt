@@ -1,15 +1,26 @@
 import { extractNames, inferPresence } from "./cast.js";
-import { FatalRunError, isAbortError, ProviderError } from "./errors.js";
-import { bibleDigest, buildBibleRequest, buildSceneRequest, parseBiblePayload, parseScenePayload } from "./prompts.js";
+import { isAbortError } from "./errors.js";
+import {
+  bibleDigest,
+  buildBibleRequest,
+  buildSceneRequest,
+  parseBiblePayload,
+  parseScenePayload,
+  salvageScenes,
+  sceneContextWindow,
+  windowMasterScript,
+} from "./prompts.js";
+import { createRouter, type LaneSlot } from "./router.js";
 import type { Scheduler } from "./scheduler.js";
 import type {
-  GenerateRequest,
   GenerateResponse,
+  LaneTelemetry,
   Provider,
   Rejection,
   RequestLog,
   RunReport,
   RunSettings,
+  RunTelemetry,
   Scene,
   SceneDraft,
   SceneResult,
@@ -17,7 +28,7 @@ import type {
   StoryBible,
 } from "./types.js";
 import { clamp, emptyResult } from "./types.js";
-import { canonSceneId, validateDraft, visualKey } from "./validators.js";
+import { canonSceneId, repairEnding, validateDraft, visualKey } from "./validators.js";
 
 export type Checkpoint = {
   id: string;
@@ -45,8 +56,11 @@ export type PipelineInput = {
   scenes: Scene[];
   knownNames?: string[];
   settings: RunSettings;
+  /** Danh sách lane theo thứ tự ưu tiên. Dùng chung `scheduler` nếu không truyền `slots`. */
   lanes: Provider[];
-  scheduler: Scheduler;
+  scheduler?: Scheduler;
+  /** Lane kèm hạn mức riêng: hàng đợi chung chia lô sang lane nào đang rảnh. */
+  slots?: LaneSlot[];
   bible?: StoryBible | null;
   prior?: SceneResult[];
   onlySceneIds?: string[];
@@ -111,90 +125,6 @@ function neighborsOf(scenes: Scene[], scene: Scene): SceneTask["neighbors"] {
   }));
 }
 
-async function callLanes(args: {
-  lanes: Provider[];
-  request: GenerateRequest;
-  scheduler: Scheduler;
-  sleep: (ms: number) => Promise<void>;
-  now: () => number;
-  signal?: AbortSignal;
-  attempt: number;
-  onLog: (log: RequestLog) => void;
-}): Promise<{ response: GenerateResponse; latencyMs: number }> {
-  const lanes = args.lanes.filter((lane) => lane.available);
-  if (!lanes.length) throw new FatalRunError("Chưa có lane nào sẵn sàng. Hãy nhập khóa API hoặc chạy mô phỏng.");
-  let last: unknown;
-  for (const lane of lanes) {
-    let backoff = 2_000;
-    for (let tryNo = 0; tryNo < 6; tryNo += 1) {
-      if (args.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      const lease = await args.scheduler.acquire(args.request.estimatedTokens);
-      const started = args.now();
-      try {
-        const response = await lane.generate(args.request, args.signal);
-        lease.reconcile(response.usage.totalTokens || args.request.estimatedTokens);
-        return { response, latencyMs: Math.max(0, args.now() - started) };
-      } catch (error) {
-        lease.reconcile(1);
-        last = error;
-        const latencyMs = Math.max(0, args.now() - started);
-        if (isAbortError(error)) throw error;
-        if (error instanceof ProviderError && (error.status === 401 || error.status === 403)) {
-          args.onLog({
-            id: crypto.randomUUID(),
-            at: args.now(),
-            lane: lane.lane,
-            model: lane.model,
-            kind: args.request.kind,
-            sceneIds: args.request.sceneIds,
-            attempt: args.attempt,
-            finishReason: "error",
-            promptTokens: 0,
-            outputTokens: 0,
-            totalTokens: 0,
-            latencyMs,
-            status: "error",
-            error: error.message,
-            rejections: [],
-          });
-          throw new FatalRunError(error.message);
-        }
-        if (error instanceof ProviderError && error.status === 429) {
-          const wait = error.retryAfterMs ?? backoff;
-          args.scheduler.penalize(wait);
-          args.onLog({
-            id: crypto.randomUUID(),
-            at: args.now(),
-            lane: lane.lane,
-            model: lane.model,
-            kind: args.request.kind,
-            sceneIds: args.request.sceneIds,
-            attempt: args.attempt,
-            finishReason: "rate_limit",
-            promptTokens: 0,
-            outputTokens: 0,
-            totalTokens: 0,
-            latencyMs,
-            status: "rate_limited",
-            error: `429, chờ ${wait}ms`,
-            rejections: [],
-          });
-          await args.sleep(wait);
-          backoff = Math.min(backoff * 2, 60_000);
-          continue;
-        }
-        if (error instanceof ProviderError && error.status >= 500 && tryNo < 2) {
-          await args.sleep(backoff);
-          backoff = Math.min(backoff * 2, 30_000);
-          continue;
-        }
-        break;
-      }
-    }
-  }
-  throw last instanceof Error ? last : new Error("Nhà cung cấp không trả lời.");
-}
-
 function rejectionLog(rows: { sceneId: string; rejections: Rejection[] }[]) {
   return rows
     .filter((row) => row.rejections.length)
@@ -223,7 +153,11 @@ export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
   let fatal: string | undefined;
   let cancelled = false;
   const batchSize = clamp(input.settings.batchSize, 4, 8);
-  const concurrency = clamp(input.settings.concurrency, 1, 6);
+  const concurrency = clamp(input.settings.concurrency, 1, 12);
+  const slots: LaneSlot[] =
+    input.slots ??
+    (input.scheduler ? input.lanes.map((provider) => ({ provider, scheduler: input.scheduler! })) : []);
+  const router = createRouter({ slots, now, sleep, signal: input.signal, onLog: (log) => pushLog(log) });
   const maxAttempts = clamp(input.settings.maxAttempts, 1, 5);
   const lock = createLock();
 
@@ -275,16 +209,7 @@ export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
         knownNames,
         maxOutputTokens: Math.min(input.settings.maxOutputTokens, 4096),
       });
-      const bibleCall = await callLanes({
-        lanes: input.lanes,
-        request,
-        scheduler: input.scheduler,
-        sleep,
-        now,
-        signal: input.signal,
-        attempt: 1,
-        onLog: pushLog,
-      });
+      const bibleCall = await router.call(request, 1);
       pushLog({
         id: crypto.randomUUID(),
         at: now(),
@@ -347,34 +272,32 @@ export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
         type: "status",
         label: `Đang viết cảnh ${batch[0].sceneId}–${batch[batch.length - 1].sceneId} · lần ${attempt}`,
       });
-      const masterScript =
+      // Chỉ gửi cửa sổ ngữ cảnh quanh lô (trước đây: tới 20.000 ký tự master script cho MỖI lô).
+      const batchIds = batch.map((scene) => scene.sceneId);
+      const contextWindow =
         input.settings.fullScript === false
           ? ""
-          : input.masterScript?.trim() ||
-            scenes.map((scene) => `[${scene.sceneId}] ${scene.title}\n${scene.source}`).join("\n\n");
+          : input.masterScript?.trim()
+            ? windowMasterScript(
+                input.masterScript,
+                batch[0].source.split("\n").find((line) => line.trim().length > 12) ?? batch[0].source,
+                scenes.findIndex((scene) => scene.sceneId === batchIds[0]) / Math.max(1, scenes.length),
+              )
+            : sceneContextWindow(scenes, batchIds, clamp(input.settings.contextScenes ?? 4, 0, 12));
       const request = buildSceneRequest({
         tasks,
         knownNames,
         bible,
         maxOutputTokens: input.settings.maxOutputTokens,
         temperature: attempt === 1 ? input.settings.temperature ?? 0.7 : 0.2,
-        masterScript,
+        contextWindow,
         topic: input.topic || input.settings.topic,
         protagonist: input.protagonist || input.settings.protagonist,
       });
       let response: GenerateResponse;
       let latencyMs = 0;
       try {
-        const called = await callLanes({
-          lanes: input.lanes,
-          request,
-          scheduler: input.scheduler,
-          sleep,
-          now,
-          signal: input.signal,
-          attempt,
-          onLog: pushLog,
-        });
+        const called = await router.call(request, attempt);
         response = called.response;
         latencyMs = called.latencyMs;
       } catch (error) {
@@ -383,7 +306,7 @@ export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
           return;
         }
         const message = error instanceof Error ? error.message : "Lỗi nhà cung cấp.";
-        if (error instanceof FatalRunError) fatal = message;
+        if (error instanceof Error && error.name === "FatalRunError") fatal = message;
         await lock(async () => {
           const rejections: Rejection[] = [{ code: "providerError", detail: message }];
           for (const scene of batch) {
@@ -427,22 +350,29 @@ export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
       await lock(async () => {
         let drafts: SceneDraft[] = [];
         let parseError = "";
+        const truncated = /MAX_TOKENS|LENGTH/i.test(response.finishReason);
         try {
           drafts = parseScenePayload(response.text);
         } catch (error) {
-          parseError = error instanceof Error ? error.message : "JSON lỗi.";
+          drafts = salvageScenes(response.text);
+          if (!drafts.length) parseError = error instanceof Error ? error.message : "JSON lỗi.";
         }
-        const truncated = /MAX_TOKENS|LENGTH/i.test(response.finishReason);
         const knownIds = tasks.map((task) => task.sceneId);
         const buckets = new Map<string, SceneDraft[]>();
-        if (!parseError) {
-          for (const draft of drafts) {
-            const id = canonSceneId(draft.scene_id, knownIds);
-            if (!id) continue;
-            const list = buckets.get(id) ?? [];
-            list.push({ ...draft, scene_id: id });
-            buckets.set(id, list);
+        let unknownRows = 0;
+        let duplicateRows = 0;
+        let autoFixedEndings = 0;
+        let rowsAccepted = 0;
+        for (const draft of drafts) {
+          const id = canonSceneId(draft.scene_id, knownIds);
+          if (!id) {
+            unknownRows += 1;
+            continue;
           }
+          const list = buckets.get(id) ?? [];
+          if (list.length) duplicateRows += 1;
+          list.push({ ...draft, scene_id: id });
+          buckets.set(id, list);
         }
         const batchRejections: { sceneId: string; rejections: Rejection[] }[] = [];
         for (const task of tasks) {
@@ -450,23 +380,37 @@ export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
           const attempts = previous.attempts + 1;
           const rows = buckets.get(task.sceneId) ?? [];
           let rejections: Rejection[] = [];
-          let draft: SceneDraft | undefined = rows[0];
-          if (parseError || !draft) {
+          let draft: SceneDraft | undefined;
+          if (!rows.length) {
             rejections = [
               {
-                code: truncated ? "truncated" : rows.length ? "duplicateSceneId" : "missing",
-                detail: parseError || (rows.length > 1 ? "Model trả trùng scene_id." : "Model bỏ sót cảnh này."),
+                code: truncated ? "truncated" : parseError ? "unparseable" : "missing",
+                detail: truncated
+                  ? `Phản hồi bị cắt (finish_reason ${response.finishReason}).`
+                  : parseError || "Model bỏ sót cảnh này.",
               },
             ];
-            if (rows.length > 1) draft = undefined;
-          } else if (rows.length > 1) {
-            rejections = [{ code: "duplicateSceneId", detail: "Model trả hai kết quả cho cùng một cảnh." }];
-            draft = undefined;
           } else {
-            const verdict = validateDraft(draft, task, knownNames, neighborPrompts(task), seenKeys());
-            rejections = verdict.rejections;
+            // Trùng scene_id: giữ bản hợp lệ đầu tiên thay vì bỏ cả hai.
+            let first: { draft: SceneDraft; rejections: Rejection[] } | null = null;
+            for (const row of rows) {
+              const repaired = repairEnding(row.prompt);
+              const candidate = { ...row, prompt: repaired.prompt };
+              const verdict = validateDraft(candidate, task, knownNames, neighborPrompts(task), seenKeys());
+              if (verdict.ok) {
+                draft = candidate;
+                if (repaired.fixed) autoFixedEndings += 1;
+                break;
+              }
+              first ??= { draft: candidate, rejections: verdict.rejections };
+            }
+            if (!draft && first) {
+              draft = first.draft;
+              rejections = first.rejections;
+            }
           }
           const accepted = Boolean(draft) && rejections.length === 0;
+          if (accepted) rowsAccepted += 1;
           emitScene({
             sceneId: task.sceneId,
             status: accepted ? "accepted" : "rejected",
@@ -500,6 +444,13 @@ export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
           latencyMs,
           status: "ok",
           rejections: rejectionLog(batchRejections),
+          rowsReturned: drafts.length,
+          rowsAccepted,
+          duplicateRows,
+          unknownRows,
+          autoFixedEndings,
+          truncated,
+          neurons: response.neurons,
         });
         input.onProgress?.({ type: "checkpoint", checkpoint: checkpoint() });
       });
@@ -571,6 +522,7 @@ export function buildReport(args: {
     lanes[log.lane] = (lanes[log.lane] ?? 0) + 1;
   }
   return {
+    telemetry: buildTelemetry(args.logs, accepted),
     startedAt: args.startedAt,
     finishedAt: args.finishedAt,
     wallTimeMs: Math.max(0, args.finishedAt - args.startedAt),
@@ -594,5 +546,54 @@ export function buildReport(args: {
     bible: args.bible,
     cancelled: args.cancelled,
     fatalError: args.fatalError,
+  };
+}
+
+function emptyLane(): LaneTelemetry {
+  return { requests: 0, ok: 0, errors: 0, rateLimited: 0, rowsReturned: 0, rowsAccepted: 0, outputTokens: 0, promptTokens: 0, neurons: 0 };
+}
+
+export function buildTelemetry(logs: RequestLog[], acceptedScenes: number): RunTelemetry {
+  const byLane: Record<string, LaneTelemetry> = {};
+  let rowsReturned = 0;
+  let rowsAccepted = 0;
+  let truncatedResponses = 0;
+  let duplicateRows = 0;
+  let unknownRows = 0;
+  let autoFixedEndings = 0;
+  let neurons = 0;
+  let outputTokens = 0;
+  for (const log of logs) {
+    const lane = (byLane[log.lane] ??= emptyLane());
+    lane.requests += 1;
+    if (log.status === "ok") lane.ok += 1;
+    else if (log.status === "rate_limited") lane.rateLimited += 1;
+    else lane.errors += 1;
+    lane.rowsReturned += log.rowsReturned ?? 0;
+    lane.rowsAccepted += log.rowsAccepted ?? 0;
+    lane.outputTokens += log.outputTokens;
+    lane.promptTokens += log.promptTokens;
+    lane.neurons += log.neurons ?? 0;
+    rowsReturned += log.rowsReturned ?? 0;
+    rowsAccepted += log.rowsAccepted ?? 0;
+    if (log.truncated) truncatedResponses += 1;
+    duplicateRows += log.duplicateRows ?? 0;
+    unknownRows += log.unknownRows ?? 0;
+    autoFixedEndings += log.autoFixedEndings ?? 0;
+    neurons += log.neurons ?? 0;
+    outputTokens += log.outputTokens;
+  }
+  for (const lane of Object.values(byLane)) lane.neurons = Math.round(lane.neurons);
+  return {
+    rowsReturned,
+    rowsAccepted,
+    rowAcceptancePct: rowsReturned ? Math.round((rowsAccepted / rowsReturned) * 1000) / 10 : 0,
+    truncatedResponses,
+    duplicateRows,
+    unknownRows,
+    autoFixedEndings,
+    outputTokensPerAccepted: acceptedScenes ? Math.round(outputTokens / acceptedScenes) : 0,
+    neurons: Math.round(neurons),
+    byLane,
   };
 }

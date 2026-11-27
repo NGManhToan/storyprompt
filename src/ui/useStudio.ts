@@ -351,7 +351,7 @@ export function useStudio() {
   }
 
   function flowOptions(): FlowOptions {
-    return { prefix: settings.prefix, footer: settings.footer, roster: knownNames, aspectRatio: settings.aspectRatio };
+    return { prefix: settings.prefix, footer: settings.footer, roster: knownNames, aspectRatio: settings.aspectRatio, arSuffix: settings.arSuffix };
   }
 
   async function copyAll() {

@@ -1,5 +1,6 @@
 import { eqName, inferPresence, mentionsName, normalizeVisibleCast } from "./cast.js";
 import type { Rejection, SceneDraft, SceneTask } from "./types.js";
+import { stripHandSkin } from "./flow.js";
 import { countWords } from "./types.js";
 
 const STOP = new Set([
@@ -28,6 +29,20 @@ const READABLE =
   /\b(?:sign|letter|note|screen|page|banner)\b[^.]{0,48}\b(?:reads|says|reading)\b|\b(?:showing|displaying|reading|with|bearing)\s+the\s+(?:text|words?)\b|\bin\s+(?:\w+\s+){0,2}letters\b/i;
 const DANGLING =
   /\b(?:and|or|but|with|to|of|for|the|a|an|in|on|at|from|into|onto)\s*[.!?]$/i;
+
+/**
+ * Cảm xúc là nhãn, không phải hình ảnh (kịch bản gốc cũng cấm "panic", "dread", "frantic"…).
+ * Ảnh 2D phẳng chỉ cần hành động và tư thế.
+ */
+export const EMOTION_WORDS =
+  /\b(?:dread(?:ful|ing)?|panic(?:ked|king|ky)?|worr(?:y|ied|ies|ying)|fear(?:s|ful|fully)?|afraid|scared|frighten(?:ed|ing)?|anxi(?:ous|ety)|nervous(?:ly)?|terrif(?:ied|ying)|terror|horror|horrified|hysteri(?:a|cal)|despair(?:ing)?|desperat(?:e|ely|ion)|agon(?:y|ized|izing)|anguish(?:ed)?|frantic(?:ally)?|distress(?:ed)?|stress(?:ed|ful)?|tens(?:e|ion)|sorrow(?:ful)?|grief|sad(?:ness|ly)?|angry|anger|furious|shock(?:ed|ing)?|overwhelm(?:ed|ing)|helpless(?:ness)?|dismay(?:ed)?|unease|uneasy|apprehensi(?:on|ve))\b/i;
+
+/** Ánh sáng kịch tính kiểu điện ảnh: lệch phong cách 2D phẳng, ít đổ bóng. */
+export const DRAMA_LIGHT =
+  /\b(?:(?:long|deep|dark|heavy|stark|harsh|sharp|hard)\s+(?:\w+\s+)?shadows?|casting\s+(?:\w+\s+){0,2}shadows?|cast\s+(?:\w+\s+){0,2}shadows?|harsh|flicker(?:ing|s|ed)?|moody|dramatic(?:ally)?|ominous|eerie|gloomy|sinister|foreboding|haunting|menacing|noir|chiaroscuro|cinematic|volumetric|glaring|blinding|stark(?:ly)?|brooding|bleak|oppressive)\b/i;
+
+/** Thay You bằng "a hand"/"a person" là sai quy tắc @You của AI Studio. */
+const HAND_STAND_IN = /\b(?:a|an|some)\s+(?:hand|hands|pair of hands)\b|\b(?:follows|shows|captures|watches)\s+hands?\b/i;
 
 export type Verdict = { ok: boolean; rejections: Rejection[] };
 
@@ -129,7 +144,7 @@ export function validateDraft(
     rejections.push({ code: "wrongLanguage", detail: "Prompt phải là tiếng Anh." });
   }
 
-  const words = countWords(prompt);
+  const words = countWords(stripHandSkin(prompt));
   if (words < 28 || words > 42) {
     rejections.push({ code: "wordCount", detail: `Prompt có ${words} từ. Cần 28–42 từ.` });
   }
@@ -148,10 +163,11 @@ export function validateDraft(
   }
 
   // @Tên chỉ hợp lệ với tên trong roster (Flow chọn ảnh tham chiếu theo @tên asset); mã màu vẫn cấm.
+  const promptNoSkin = stripHandSkin(prompt);
   const strayTags = [...prompt.matchAll(/@([\p{L}][\p{L}\p{N}_]*)/gu)]
     .map((match) => match[1])
     .filter((tag) => !knownNames.some((name) => eqName(name, tag)));
-  if (strayTags.length || /#[0-9a-f]{3,8}\b/i.test(prompt)) {
+  if (strayTags.length || /#[0-9a-f]{3,8}\b/i.test(promptNoSkin)) {
     rejections.push({
       code: "appearanceOverride",
       detail: strayTags.length
@@ -160,12 +176,26 @@ export function validateDraft(
     });
   }
 
-  if (hasUnnamedCharacter(prompt)) {
+  const emotion = EMOTION_WORDS.exec(promptNoSkin)?.[0];
+  const drama = DRAMA_LIGHT.exec(promptNoSkin)?.[0];
+  if (emotion || drama) {
+    rejections.push({
+      code: "styleClash",
+      detail: emotion
+        ? `Từ cảm xúc "${emotion}" bị cấm: ảnh 2D phẳng chỉ tả hành động và tư thế, không tả cảm xúc.`
+        : `Ánh sáng/bóng kịch tính "${drama}" lệch phong cách 2D phẳng: dùng ánh sáng đều, dịu (soft daylight, plain lamp light).`,
+    });
+  }
+
+  const standIn = HAND_STAND_IN.test(promptNoSkin) && knownNames.some((name) => eqName(name, "You"));
+  if (hasUnnamedCharacter(prompt) || standIn) {
     rejections.push({
       code: "unnamedCharacter",
-      detail: presence.present.length
-        ? "Hãy gọi đúng tên nhân vật đang trong khung, đừng dùng man/woman/person."
-        : "Cảnh không có người trong khung nhưng prompt thêm người không tên.",
+      detail: standIn
+        ? "Không thay @You bằng \"a hand\"/\"a person\": viết rõ @You's hand hoặc @You."
+        : presence.present.length
+          ? "Hãy gọi đúng tên nhân vật đang trong khung, đừng dùng man/woman/person."
+          : "Cảnh không có người trong khung nhưng prompt thêm người không tên.",
     });
   }
 
@@ -188,7 +218,9 @@ export function validateDraft(
     if (mentionsName(prompt, name) && !cast.some((item) => eqName(item, name))) {
       rejections.push({
         code: "castInconsistent",
-        detail: `Prompt nhắc ${name} nhưng visible_cast không có tên đó.`,
+        detail: presence.mentionedOnly.some((item) => eqName(item, name))
+          ? `OFFFRAME ${name}: chỉ được nhắc hoặc nghe qua điện thoại/tin nhắn, không vào khung.`
+          : `Prompt nhắc ${name} nhưng visible_cast không có tên đó.`,
       });
     }
   }
@@ -272,7 +304,14 @@ export function retryFeedback(rejections: Rejection[]): string {
       case "castAbsent":
       case "castInconsistent":
       case "castMissing":
-        lines.add(`Cast: ${item.detail} visible_cast must list exactly the named people shown in the prompt.`);
+        lines.add(
+          item.code === "castAbsent" || item.detail.startsWith("OFFFRAME")
+            ? `Cast: ${item.detail} Remove that name from the prompt and from visible_cast. Someone heard only by phone, call or message is NOT in frame: show the phone, the screen or @You instead.`
+            : `Cast: ${item.detail} visible_cast must list exactly the named people shown in the prompt.`,
+        );
+        break;
+      case "styleClash":
+        lines.add(`${item.detail} Rewrite with neutral physical action only. Light: soft daylight or plain lamp light, no dramatic shadows. No emotion words.`);
         break;
       case "borrowedAction":
         lines.add("Depict only this scene's own action; do not reuse the neighbor scene's action or wording. source_anchor must be copied verbatim from this scene's SOURCE.");
@@ -284,7 +323,7 @@ export function retryFeedback(rejections: Rejection[]): string {
         lines.add("No readable text, captions or quoted words in the image.");
         break;
       case "appearanceOverride":
-        lines.add("No @tags, hex colors or appearance descriptions.");
+        lines.add("Tag only roster names with @. No hex colors or appearance descriptions.");
         break;
       default:
         lines.add(`${item.detail}`);

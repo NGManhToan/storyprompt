@@ -1,3 +1,4 @@
+import { inferPresence } from "./cast.js";
 import { expectedOutput, outputBudget } from "./laneLimits.js";
 import type { GenerateRequest, SceneDraft, SceneTask, StoryBible } from "./types.js";
 
@@ -138,6 +139,7 @@ Neighbor blocks are read-only. Never borrow their actions, props, or blocking.
 CUTAWAY:
 When this scene's own source describes a named character doing something or living through an event, show that character. Do not leave the protagonist in frame during that line.
 When a name is only mentioned and the line gives them no action to depict, they stay out of frame. Off-screen and voice-over speakers stay out of frame.
+Anyone who is only heard, called, texted or emailed (the other end of a phone call, voicemail, message or video call) is NOT in frame: never name them in the prompt and never list them in visible_cast. Show the phone, the screen, or the character who is holding it instead. A named character who is shown doing something on their own side of a call (for example arguing into a phone at their own desk) may be shown.
 
 VARIETY:
 Never make the same prop the subject of two consecutive shots.
@@ -146,6 +148,8 @@ Change location only when the script moves or a cutaway is required.
 
 LOOK:
 Flat 2D cartoon illustration that must match the character reference images (clean outlines, flat colors). Do not write the style footer yourself. Code appends it.
+Describe only physical action, posture, objects and place. NEVER write emotion words or labels (dread, panic, worried, worry, fear, afraid, anxious, nervous, terror, horror, hysteria, despair, agony, frantic, stress, tense, sad, angry, shock, uneasy). Convey tension only through mechanical facts: what the hands and objects are doing.
+Light must be plain and even: "soft daylight", "plain overhead light", "warm lamp light". NEVER write dramatic or cinematic lighting: no long/deep/dark/harsh shadows, no "casting shadows", harsh, flickering, moody, dramatic, ominous, eerie, gloomy, noir, cinematic, glaring, neon glow.
 prompt: one English sentence of 28 to 42 words, in this order: camera framing, who (tagged) does what action now, the place implied by the line, then the light. End with a period.
 No dialogue, quotations, subtitles, captions, readable signs, or title cards.
 
@@ -210,7 +214,8 @@ function brief(text: string, limit: number): string {
   return clean.length <= limit ? clean : `${clean.slice(0, limit).replace(/\s+\S*$/, "")} …`;
 }
 
-function renderTask(task: SceneTask): string {
+function renderTask(task: SceneTask, knownNames: string[] = []): string {
+  const offFrame = knownNames.length ? inferPresence(task.source, knownNames).mentionedOnly : [];
   // Cảnh bên cạnh chỉ gửi tóm tắt ngắn: đủ để giữ không gian, không đủ chi tiết để model chép hành động.
   const neighbors = task.neighbors
     .map(
@@ -223,6 +228,7 @@ function renderTask(task: SceneTask): string {
     "STATUS: WRITE THIS SCENE ONLY",
     `TITLE: ${task.title}`,
     `LIKELY ON CAMERA (hint, confirm against the source): ${task.likelyPresent.join(", ") || "(no person)"}`,
+    offFrame.length ? `OFF-FRAME (only heard, called, messaged or mentioned; do NOT name or show): ${offFrame.join(", ")}` : "",
     "SOURCE (only this text belongs to this scene; source_anchor must be copied verbatim from it):",
     task.source,
     task.feedback ? `PREVIOUS DRAFT REJECTED: ${task.feedback}` : "",
@@ -305,7 +311,7 @@ export function buildSceneRequest(args: {
     `ROSTER (names only, no appearance): ${args.knownNames.join(", ") || "(discover from the sources)"}`,
     args.protagonist?.trim() ? `PROTAGONIST NAME (locked token, no appearance): ${args.protagonist.trim()}` : "",
     args.knownNames.some((name) => name.toLowerCase() === "you")
-      ? 'NARRATOR: the narration is second person, and "You" is a roster character with a reference image. When this scene\'s source has "you" acting, show @You: "point-of-view shot of @You\'s hand ...", "over-the-shoulder shot from behind @You ...", or "medium shot of @You ...". List "You" in visible_cast. When the line is a cutaway to another named character\'s action, show that character instead.'
+      ? 'NARRATOR: the narration is second person, and "You" is a roster character with a reference image. When this scene\'s source has "you" acting, show @You using exactly one of these shot forms: "First-person POV of @You\'s hand holding/pressing/opening ...", "Medium shot of @You looking at ...", or "Over-the-shoulder shot from behind @You ...". List "You" in visible_cast. Never replace @You with "a hand", "a person", "someone" or "the protagonist". Do not write any skin color or hex code: code adds the skin-color clause after "@You\'s hand". When the line is a cutaway to another named character\'s own action, show that character instead.'
       : "",
     context
       ? `STORY CONTEXT WINDOW (spatial anchor only. Do not depict actions from scenes you are not writing.):\n${context}`
@@ -315,7 +321,7 @@ export function buildSceneRequest(args: {
     bibleBlock(args.bible),
     `Write exactly ${args.tasks.length} scene object(s), one per scene_id: ${args.tasks.map((task) => task.sceneId).join(", ")}. Never repeat a scene_id. Skip nothing.`,
     "Each prompt: 30-40 English words (hard limit 28-42) — count before answering. Never show readable text, letters, labels or UI words in the image.",
-    args.tasks.map(renderTask).join("\n\n"),
+    args.tasks.map((task) => renderTask(task, args.knownNames)).join("\n\n"),
   ]
     .filter(Boolean)
     .join("\n\n");

@@ -416,7 +416,7 @@ function SceneWorkspace({
 
   const styleId = STYLES.find((item) => item.footer === studio.settings.footer)?.id ?? "flat";
   const cast = result?.visibleCast ?? [];
-  const shown = prompt ? composeFlowPrompt(prompt, cast, studio.settings.prefix, studio.settings.footer) : "";
+  const shown = prompt ? composeFlowPrompt(prompt, cast, studio.settings.prefix, studio.settings.footer, studio.settings.arSuffix ? studio.settings.aspectRatio : undefined) : "";
   const refs = referencesFor(cast, studio.knownNames);
   const status = bucket(result?.status);
   const src = images[Math.min(photo, Math.max(0, images.length - 1))];
@@ -609,6 +609,7 @@ function SettingsDrawer({ studio, onClose }: { studio: ReturnType<typeof useStud
         <label>Tỷ lệ khung Flow<select value={settings.aspectRatio} onChange={(event) => set({ ...settings, aspectRatio: event.target.value })}>
           {["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"].map((ratio) => <option key={ratio} value={ratio}>{ratio}</option>)}
         </select></label>
+        <label className="switch"><input type="checkbox" checked={settings.arSuffix} onChange={(event) => set({ ...settings, arSuffix: event.target.checked })} /><span>Thêm "--ar {settings.aspectRatio}" cuối prompt (kiểu AI Studio)</span></label>
       </aside>
     </div>
   );

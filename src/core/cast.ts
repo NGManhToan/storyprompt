@@ -59,8 +59,15 @@ function looksLikeSpeaker(name: string): boolean {
 
 function isOffscreen(cue: string | undefined): boolean {
   if (!cue) return false;
-  return /(v\.?\s*o\.?|o\.?\s*s\.?|off)/i.test(cue);
+  return /(v\.?\s*o\.?|o\.?\s*s\.?|off|phone|call|remote|filter)/i.test(cue);
 }
+
+/** Người chỉ nghe/nhận qua điện thoại, cuộc gọi, tin nhắn, email: không vào khung hình. */
+const REMOTE_CUE =
+  /\b(?:calls?|called|calling|voicemail|messages?|messaged|texts|texted|emails?|e-mail|speakerphone|on the line|hang(?:s|ing)? up|hung up|vibrates?|vibrated|video call|zoom|phone call|(?:on|over|into|via|by) (?:the |your |his |her |their )?(?:phone|cell|mobile|speaker)|(?:phone|cell) (?:rings|buzzes|lights up))\b/i;
+const SECOND_PERSON = /\b(?:you|your|you're|yourself)\b/i;
+/** "Your phone vibrates…": lời kể ngôi thứ hai nghĩa là You đang ở trong cảnh dù không có từ "You" đứng một mình. */
+const YOU_POSSESSIVE_LINE = /\b(?:your|you're|yourself)\b/i;
 
 type SpeakerHit = { name: string; cue?: string; utterance: string };
 
@@ -129,9 +136,21 @@ export function inferPresence(source: string, knownNames: string[]): Presence {
     }
     if (/^(?:cảnh|canh|scene|sc|int\.|ext\.|i\/e\.|int\/ext\.)/i.test(line)) continue;
     for (const name of known) {
+      const isYou = eqName(name, "You");
+      if (isYou && YOU_POSSESSIVE_LINE.test(line)) {
+        add(present, name);
+        continue;
+      }
       if (!containsName(line, name)) continue;
-      if (clauseAbsents(line, name)) add(mentioned, name);
-      else add(present, name);
+      if (clauseAbsents(line, name)) {
+        add(mentioned, name);
+        continue;
+      }
+      // Gọi/nhắn với You: chỉ có tiếng hoặc chữ, không vào khung. Cảnh người đó tự hành động (không có You trong mệnh đề) vẫn hiện.
+      const clauses = line.split(/[.!?;]/).filter((clause) => containsName(clause, name));
+      const remote = REMOTE_CUE.test(line) && clauses.length > 0 && clauses.every((clause) => SECOND_PERSON.test(clause));
+      const onScreen = isYou || !remote;
+      add(onScreen ? present : mentioned, name);
     }
   }
 

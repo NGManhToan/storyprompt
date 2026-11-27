@@ -31,6 +31,8 @@ export type Settings = RunSettings & {
   extraNames: string;
   /** Tỷ lệ khung chọn trong Flow (không ghi vào prompt). */
   aspectRatio: string;
+  /** Thêm "--ar 16:9" cuối prompt (kiểu Midjourney của AI Studio). Flow không cần, nên mặc định tắt. */
+  arSuffix: boolean;
 };
 
 const LEGACY_FOOTER = "modern 2D webtoon comic style, crisp ink line art, cel-shaded, warm daylight, clean frame, no text, 16:9";
@@ -73,6 +75,7 @@ export const defaultSettings: Settings = {
   // Tên khớp ảnh nhân vật bạn tải lên Flow (You.png, Derek.jpg, Chloe.jpg, Julian.jpg, Arthur.jpg).
   extraNames: DEFAULT_CHARACTERS.join(", "),
   aspectRatio: "16:9",
+  arSuffix: false,
 };
 
 const SETTINGS_KEY = "storyprompt.settings.v4";
@@ -96,6 +99,7 @@ export function migrateSettings(raw: LegacyShape): Settings {
   if (merged.maxOutputTokens === 8192) merged.maxOutputTokens = defaultSettings.maxOutputTokens;
   if (!merged.extraNames?.trim()) merged.extraNames = defaultSettings.extraNames;
   if (!merged.aspectRatio) merged.aspectRatio = defaultSettings.aspectRatio;
+  if (typeof merged.arSuffix !== "boolean") merged.arSuffix = false;
   // Hậu tố webtoon cũ (mặc định trước đây) → khối phong cách theo ảnh nhân vật.
   if (merged.footer === LEGACY_FOOTER) merged.footer = defaultSettings.footer;
   return merged;

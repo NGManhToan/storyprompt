@@ -14,6 +14,7 @@ export type RejectionCode =
   | "unnamedCharacter"
   | "borrowedAction"
   | "overlayText"
+  | "styleClash"
   | "appearanceOverride"
   | "duplicateVisualKey"
   | "duplicateSceneId"

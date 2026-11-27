@@ -14,6 +14,22 @@ export const DEFAULT_CHARACTERS = ["You", "Derek", "Chloe", "Julian", "Arthur"];
 export const FLOW_STYLE_FOOTER =
   "Flat 2D cartoon illustration in the same style as the character reference images: clean bold black outlines, flat solid colors, minimal soft shading, simple uncluttered background. Keep each tagged character's face, hair and outfit exactly as in their reference image. No text, no captions, no watermark.";
 
+/** Cụm app AI Studio gắn sau "@You's hand": da trắng phẳng của You (đúng chữ trong modal Prompt Ảnh @You). */
+export const HAND_SKIN = "(pure flat white skin #FFFFFF)";
+const HAND_SKIN_RE = /\(pure flat white skin #FFFFFF\)/gi;
+const BODY_PART_AFTER_YOU = /@You's\s+(?:(?:left|right|bare|both)\s+)*(?:index\s+fingers?|hands?|fingers?|arms?|palms?|fists?|wrists?|thumbs?)\b/i;
+
+/** Bỏ cụm da trắng khi đếm từ / kiểm mã màu (cụm này do code thêm, không phải lỗi của model). */
+export function stripHandSkin(text: string): string {
+  return text.replace(HAND_SKIN_RE, " ").replace(/\s{2,}/g, " ").trim();
+}
+
+/** Khi chỉ thấy tay/bộ phận của @You thì thêm đúng cụm của AI Studio, một lần. */
+export function addHandSkin(text: string): string {
+  if (/pure flat white skin/i.test(text)) return text;
+  return text.replace(BODY_PART_AFTER_YOU, (match) => `${match} ${HAND_SKIN}`);
+}
+
 function escape(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -43,14 +59,15 @@ export function tagCast(prompt: string, cast: string[]): string {
     text = text.replace(bare, `@${name}`);
     text = text.replace(new RegExp(`@${escape(name)}(?![\\p{L}\\p{N}])`, "giu"), `@${name}`);
   }
-  return text;
+  return cast.some((name) => eqName(name, "You")) ? addHandSkin(text) : text;
 }
 
 /** Prompt dán vào Flow: tiền tố + câu cảnh đã gắn @Tên + khối phong cách. */
-export function composeFlowPrompt(prompt: string, cast: string[], prefix: string, footer: string): string {
+export function composeFlowPrompt(prompt: string, cast: string[], prefix: string, footer: string, aspectRatio?: string): string {
   const body = tagCast(prompt, cast);
   const sentence = body ? body.charAt(0).toUpperCase() + body.slice(1) : body;
-  return [prefix.trim(), sentence, footer.trim()].filter(Boolean).join(" ");
+  // --ar là cú pháp Midjourney của app AI Studio; Flow chọn tỷ lệ trong menu nên mặc định không thêm (xem cài đặt).
+  return [prefix.trim(), sentence, footer.trim(), aspectRatio ? `--ar ${aspectRatio}` : ""].filter(Boolean).join(" ");
 }
 
 /** Ảnh tham chiếu cần gắn cho cảnh: đúng các nhân vật trong khung, theo thứ tự roster. */

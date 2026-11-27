@@ -5,7 +5,7 @@ export function wrapPrompt(body: string, prefix: string, footer: string): string
   return [prefix.trim(), body.trim(), footer.trim()].filter(Boolean).join(" ");
 }
 
-export type FlowOptions = { prefix: string; footer: string; roster?: string[]; aspectRatio?: string };
+export type FlowOptions = { prefix: string; footer: string; roster?: string[]; aspectRatio?: string; /** Thêm "--ar 16:9" cuối prompt (kiểu Midjourney của app AI Studio). */ arSuffix?: boolean };
 
 export type FlowScene = { id: string; time: string; references: string[]; prompt: string };
 
@@ -23,7 +23,7 @@ export function flowScenes(scenes: Scene[], results: SceneResult[], options: Flo
         id: scene.sceneId,
         time: scene.timeRange || (scene.start || scene.end ? `${scene.start} - ${scene.end}` : ""),
         references: referencesFor(cast, options.roster ?? []),
-        prompt: composeFlowPrompt(result.prompt, cast, options.prefix, options.footer),
+        prompt: composeFlowPrompt(result.prompt, cast, options.prefix, options.footer, options.arSuffix ? options.aspectRatio ?? "16:9" : undefined),
       },
     ];
   });
@@ -88,7 +88,7 @@ export function toCsv(scenes: Scene[], results: SceneResult[], options: FlowOpti
     const result = results.find((item) => item.sceneId === scene.sceneId);
     const ok = usable(result);
     const cast = ok ? result.visibleCast ?? [] : [];
-    const prompt = ok ? composeFlowPrompt(result.prompt, cast, options.prefix, options.footer) : "";
+    const prompt = ok ? composeFlowPrompt(result.prompt, cast, options.prefix, options.footer, options.arSuffix ? options.aspectRatio ?? "16:9" : undefined) : "";
     return [
       scene.sceneId,
       csvCell(scene.timeRange || `${scene.start} - ${scene.end}`),

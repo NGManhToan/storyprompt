@@ -5,7 +5,8 @@ import { composeFlowPrompt, DEFAULT_CHARACTERS, FLOW_STYLE_FOOTER, referencesFor
 import { buildSceneRequest } from "../src/core/prompts.js";
 import type { Scene, SceneDraft, SceneResult, SceneTask } from "../src/core/types.js";
 import { emptyResult } from "../src/core/types.js";
-import { validateDraft } from "../src/core/validators.js";
+import { inferPresence } from "../src/core/cast.js";
+import { retryFeedback, validateDraft } from "../src/core/validators.js";
 
 const ROSTER = DEFAULT_CHARACTERS;
 
@@ -13,7 +14,11 @@ describe("Flow prompt format", () => {
   it("tags on-camera roster names with @ once, and maps second-person You", () => {
     expect(tagCast("Medium shot of Derek holding the phone at the counter.", ["Derek"])).toBe("Medium shot of @Derek holding the phone at the counter.");
     expect(tagCast("Medium shot of @Derek holding the phone.", ["Derek"])).toBe("Medium shot of @Derek holding the phone.");
-    expect(tagCast("Point-of-view shot of your hand pressing the power button.", ["You"])).toBe("Point-of-view shot of @You's hand pressing the power button.");
+    expect(tagCast("Point-of-view shot of your hand pressing the power button.", ["You"])).toBe("Point-of-view shot of @You's hand (pure flat white skin #FFFFFF) pressing the power button.");
+    // Đã có cụm da trắng thì không thêm lần nữa.
+    expect(tagCast("First-person POV of @You's hand (pure flat white skin #FFFFFF) opening the drawer.", ["You"])).toBe("First-person POV of @You's hand (pure flat white skin #FFFFFF) opening the drawer.");
+    // Chỉ thêm khi bộ phận cơ thể của You là chủ thể; "@You" nguyên người thì không.
+    expect(tagCast("Medium shot of @You looking at the monitor.", ["You"])).toBe("Medium shot of @You looking at the monitor.");
     expect(tagCast("Over-the-shoulder shot from behind @you at the desk.", ["You"])).toBe("Over-the-shoulder shot from behind @You at the desk.");
     // Tên không trong khung thì không gắn.
     expect(tagCast("Arthur wipes his hands near the car.", [])).toBe("Arthur wipes his hands near the car.");
@@ -64,7 +69,7 @@ describe("validators for Flow tags", () => {
 
   it("accepts @Name for roster names", () => {
     const ok = validateDraft(
-      draft("Medium shot of @Arthur wiping his hands on a greasy shop rag while @You listens beside the lifted car, inside the cramped repair shop under hard overhead fluorescent light.", ["Arthur", "You"]),
+      draft("Medium shot of @Arthur wiping his hands on a greasy shop rag while @You listens beside the lifted car, inside the cramped repair shop under soft overhead light.", ["Arthur", "You"]),
       task,
       ROSTER,
       [],
@@ -75,7 +80,7 @@ describe("validators for Flow tags", () => {
 
   it("rejects @tags that are not on the roster", () => {
     const bad = validateDraft(
-      draft("Medium shot of @Arthur wiping his hands on a greasy shop rag while @Mechanic listens beside the lifted car, inside the cramped repair shop under hard overhead fluorescent light.", ["Arthur", "You"]),
+      draft("Medium shot of @Arthur wiping his hands on a greasy shop rag while @Mechanic listens beside the lifted car, inside the cramped repair shop under soft overhead light.", ["Arthur", "You"]),
       task,
       ROSTER,
       [],
@@ -95,5 +100,78 @@ describe("validators for Flow tags", () => {
     expect(withYou.promptText).toContain("@You");
     const without = buildSceneRequest({ tasks: [task], knownNames: ["Lan"], maxOutputTokens: 4096, temperature: 0.7 });
     expect(without.promptText).not.toContain("@You");
+  });
+});
+
+describe("AI Studio conventions", () => {
+  const task: SceneTask = {
+    sceneId: "012",
+    title: "Call",
+    source: "Your phone vibrates on the desk, showing an incoming call from Derek. You pick up and speak directly to Derek and Chloe.",
+    likelyPresent: ["You"],
+    neighbors: [],
+  };
+  const check = (prompt: string, cast: string[]) =>
+    validateDraft(
+      { scene_id: "012", title: "Call", environment: "Desk", prompt, visible_cast: cast, source_anchor: "Your phone vibrates on the desk" },
+      task,
+      ROSTER,
+      [],
+      new Map(),
+    ).rejections;
+  const BASE = "of @You's hand picking up the vibrating phone from the wooden desk beside the laptop, the screen showing a caller name, in soft daylight from the window.";
+
+  it("keeps people who are only heard by phone/message out of frame", () => {
+    const presence = inferPresence(task.source, ROSTER);
+    expect(presence.present).toContain("You");
+    expect(presence.present).not.toContain("Derek");
+    expect(presence.present).not.toContain("Chloe");
+    expect(presence.mentionedOnly).toEqual(expect.arrayContaining(["Derek", "Chloe"]));
+    // Derek tự hành động bên phía anh ta (không có You trong mệnh đề) vẫn được hiện.
+    expect(inferPresence("Derek argues into his phone at his desk.", ROSTER).present).toContain("Derek");
+    const request = buildSceneRequest({ tasks: [task], knownNames: ROSTER, maxOutputTokens: 4096, temperature: 0.7 });
+    expect(request.promptText).toContain("OFF-FRAME");
+    expect(request.promptText).toContain("Derek");
+  });
+
+  it("rejects drawing the remote caller and tells the model how to fix it", () => {
+    const rejections = check("Medium shot of @Derek talking on the phone beside @You at the wooden desk in soft daylight from the window over the quiet kitchen.", ["Derek", "You"]);
+    expect(rejections.some((item) => item.code === "castAbsent")).toBe(true);
+    expect(retryFeedback(rejections)).toMatch(/phone, call or message is NOT in frame/);
+    expect(check(`First-person POV ${BASE}`, ["You"])).toEqual([]);
+  });
+
+  it("rejects emotion words and cinematic-drama lighting", () => {
+    for (const bad of [
+      "First-person POV of @You's hand picking up the phone while dread settles over the wooden desk in soft daylight from the window by the laptop.",
+      "First-person POV of @You's hand picking up the phone under the harsh blue light of the monitor on the wooden desk beside the laptop.",
+      "First-person POV of @You's hand picking up the phone while flickering neon casts long shadows over the wooden desk beside the laptop.",
+    ]) {
+      expect(check(bad, ["You"]).map((item) => item.code)).toContain("styleClash");
+    }
+    expect(retryFeedback(check("First-person POV of @You's hand picking up the phone in moody light on the wooden desk by the laptop and window.", ["You"]))).toMatch(/No emotion words/);
+  });
+
+  it("allows only the AI Studio hand-skin hex and does not count it as words", () => {
+    expect(check(`First-person POV of @You's hand (pure flat white skin #FFFFFF) picking up the vibrating phone from the wooden desk beside the open laptop and the coffee mug, in soft daylight from the window.`, ["You"])).toEqual([]);
+    expect(check(`First-person POV of @You's hand (skin #FFAA00) picking up the vibrating phone from the wooden desk beside the open laptop and the coffee mug, in soft daylight from the window.`, ["You"]).map((item) => item.code)).toContain("appearanceOverride");
+  });
+
+  it("rejects 'a hand' / 'a person' standing in for @You", () => {
+    expect(check("First-person shot of a hand picking up the vibrating phone from the wooden desk beside the laptop, in soft daylight from the window.", ["You"]).map((item) => item.code)).toContain("unnamedCharacter");
+    expect(check("Close-up that follows hands picking up the vibrating phone from the wooden desk beside the laptop, in soft daylight from the window.", ["You"]).map((item) => item.code)).toContain("unnamedCharacter");
+  });
+
+  it("puts the three AI Studio shot templates in the instruction only when You is on the roster", () => {
+    const withYou = buildSceneRequest({ tasks: [task], knownNames: ROSTER, maxOutputTokens: 4096, temperature: 0.7 });
+    expect(withYou.promptText).toContain("First-person POV of @You's hand");
+    expect(withYou.promptText).toContain("Medium shot of @You looking at");
+    expect(withYou.promptText).toContain("Over-the-shoulder shot from behind @You");
+    expect(withYou.promptText).not.toContain("#FFFFFF");
+  });
+
+  it("adds --ar only when asked", () => {
+    expect(composeFlowPrompt("wide shot of the kitchen.", [], "", "", undefined)).toBe("Wide shot of the kitchen.");
+    expect(composeFlowPrompt("wide shot of the kitchen.", [], "", "", "16:9")).toBe("Wide shot of the kitchen. --ar 16:9");
   });
 });

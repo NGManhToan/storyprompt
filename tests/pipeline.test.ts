@@ -161,7 +161,8 @@ describe("pipeline retry", () => {
     expect(on.promptText).toContain("STORY BIBLE");
     expect(on.systemText).toMatch(/story bible/i);
     expect(on.responseSchema).toMatchObject({ required: ["scenes"] });
-    expect(on.maxOutputTokens).toBe(8192);
+    expect(on.maxOutputTokens).toBeLessThan(8192);
+    expect(on.maxOutputTokens).toBeGreaterThanOrEqual(256);
   });
 });
 

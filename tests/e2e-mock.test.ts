@@ -71,8 +71,9 @@ describe("mocked 20-scene run", () => {
     expect(handoff.scenes[0].prompt).toContain("reference images");
 
     const body = buildGeminiBody(provider.calls[0]);
-    expect(JSON.stringify(body)).toContain("responseSchema");
-    expect(JSON.stringify(body)).toContain("8192");
+    expect(JSON.stringify(body)).toContain("responseJsonSchema");
+    expect(JSON.stringify(body)).toContain("minItems");
+    expect(JSON.stringify(body)).not.toContain("maxOutputTokens");
     expect(JSON.stringify(body)).not.toMatch(/Derek|Chloe|#FFFFFF|@You/);
   });
 });

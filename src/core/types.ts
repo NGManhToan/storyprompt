@@ -95,6 +95,10 @@ export type GenerateRequest = {
   sceneIds: string[];
   tasks: SceneTask[];
   estimatedTokens: number;
+  /** Ước lượng token input (system + prompt). */
+  estimatedInputTokens?: number;
+  /** Ước lượng token output cho lô này. */
+  estimatedOutputTokens?: number;
 };
 
 export type GenerateResponse = {
@@ -107,6 +111,8 @@ export type GenerateResponse = {
     outputTokens: number;
     totalTokens: number;
   };
+  /** Neuron Cloudflare ước theo bảng giá (chỉ lane cloudflare). */
+  neurons?: number;
 };
 
 export type Provider = {
@@ -149,6 +155,14 @@ export type RequestLog = {
   status: "ok" | "error" | "rate_limited";
   error?: string;
   rejections: { sceneId: string; reasons: string[] }[];
+  /** Số hàng model trả về (kể cả trùng / lạ). */
+  rowsReturned?: number;
+  rowsAccepted?: number;
+  duplicateRows?: number;
+  unknownRows?: number;
+  autoFixedEndings?: number;
+  truncated?: boolean;
+  neurons?: number;
 };
 
 export type RunReport = {
@@ -171,6 +185,33 @@ export type RunReport = {
   bible: boolean;
   cancelled: boolean;
   fatalError?: string;
+  telemetry?: RunTelemetry;
+};
+
+export type LaneTelemetry = {
+  requests: number;
+  ok: number;
+  errors: number;
+  rateLimited: number;
+  rowsReturned: number;
+  rowsAccepted: number;
+  outputTokens: number;
+  promptTokens: number;
+  neurons: number;
+};
+
+export type RunTelemetry = {
+  rowsReturned: number;
+  rowsAccepted: number;
+  /** rowsAccepted / rowsReturned, %. */
+  rowAcceptancePct: number;
+  truncatedResponses: number;
+  duplicateRows: number;
+  unknownRows: number;
+  autoFixedEndings: number;
+  outputTokensPerAccepted: number;
+  neurons: number;
+  byLane: Record<string, LaneTelemetry>;
 };
 
 export type RunSettings = {
@@ -182,7 +223,10 @@ export type RunSettings = {
   prefix: string;
   footer: string;
   temperature?: number;
+  /** true = gửi cửa sổ ngữ cảnh quanh lô (không gửi cả kịch bản). */
   fullScript?: boolean;
+  /** Số cảnh mỗi phía đưa vào cửa sổ ngữ cảnh. */
+  contextScenes?: number;
   topic?: string;
   protagonist?: string;
 };

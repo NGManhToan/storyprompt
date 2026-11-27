@@ -6,9 +6,10 @@
  * Kết quả ghi vào bench-results/<thời điểm>.json.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractNames } from "../src/core/cast.js";
+import { buildScenes, type ChunkMode } from "../src/core/chunk.js";
 import { cfNeurons, DEFAULT_LIMITS } from "../src/core/laneLimits.js";
 import { runPipeline } from "../src/core/pipeline.js";
 import { createMockProvider } from "../src/core/providers/mock.js";
@@ -16,7 +17,6 @@ import { geminiProvider, resolveGeminiModels } from "../src/core/providers/gemin
 import { generateCloudflare, generateGroq } from "../src/core/providers/httpLanes.js";
 import type { LaneSlot } from "../src/core/router.js";
 import { createScheduler } from "../src/core/scheduler.js";
-import { parseSrt } from "../src/core/srt.js";
 import type { Provider } from "../src/core/types.js";
 import { DEFAULT_CF_MODEL, DEFAULT_GROQ_MODEL } from "../src/server/api.js";
 import { loadEnvFiles } from "../src/server/env.js";
@@ -38,8 +38,10 @@ const wanted = (arg("lanes", "gemini,groq,cloudflare") ?? "").split(",").map((it
 const batchSize = Number(arg("batch", "4"));
 const concurrency = Number(arg("concurrency", "6"));
 
-const raw = readFileSync(join(root, file), "utf8");
-const parsed = parseSrt(raw);
+const mode = (arg("mode", "fixed") ?? "fixed") as ChunkMode;
+const duration = Number(arg("duration", "8"));
+const raw = readFileSync(resolve(root, file), "utf8");
+const parsed = buildScenes(raw, { mode, duration, kind: "srt" });
 let scenes = parsed.scenes;
 while (scenes.length < count) {
   // Nhân bản cảnh để đủ số lượng (đổi id) khi file mẫu ngắn hơn.
@@ -100,7 +102,7 @@ if (mock) {
 }
 
 console.log(
-  `[bench] scenes=${scenes.length} file=${file} mock=${mock} keys=${JSON.stringify(present)} lanes=${slots.map((slot) => `${slot.provider.lane}:${slot.provider.model}`).join(",") || "(none)"}`,
+  `[bench] scenes=${scenes.length}/${parsed.scenes.length} mode=${mode}/${duration}s file=${file.replace(/^.*[\\/]/, "")} mock=${mock} keys=${JSON.stringify(present)} lanes=${slots.map((slot) => `${slot.provider.lane}:${slot.provider.model}`).join(",") || "(none)"}`,
 );
 if (!slots.length) {
   console.log("[bench] Không có lane nào có khóa. Đặt GEMINI_API_KEY / GROQ_API_KEY / CLOUDFLARE_* trong .env.");

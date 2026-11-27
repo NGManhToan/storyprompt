@@ -350,3 +350,15 @@ describe("mô phỏng 211 cảnh với hạn mức thật (đồng hồ ảo)", 
     );
   });
 });
+
+describe("validator: false positive từ live Groq-20", () => {
+  it("'no people present' không phải người không tên", async () => {
+    const { hasUnnamedCharacter, retryFeedback } = await import("../src/core/validators.js");
+    expect(hasUnnamedCharacter("A wide shot of an empty street with no people present.")).toBe(false);
+    expect(hasUnnamedCharacter("Nobody walks the wet pavement.")).toBe(false);
+    expect(hasUnnamedCharacter("A man crosses the wet pavement.")).toBe(true);
+    const text = retryFeedback([{ code: "wordCount", detail: "Prompt có 24 từ. Cần 28–42 từ." }]);
+    expect(text).toContain("[wordCount]");
+    expect(text).toContain("24 words");
+  });
+});

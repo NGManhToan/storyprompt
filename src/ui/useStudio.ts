@@ -213,7 +213,7 @@ export function useStudio() {
           usage: loadLaneUsage,
           onUsage: (lane, next) => {
             saveLaneUsage(lane, next);
-            if (lane === lanes[0]?.lane) {
+            if (lane === (lanes[0]?.usageKey ?? lanes[0]?.lane)) {
               const day = { dayKey: next.dayKey, count: next.count };
               saveUsage(day);
               setUsage(day);

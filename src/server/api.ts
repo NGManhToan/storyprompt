@@ -23,6 +23,68 @@ function safe(message: string) {
   return message.replace(/key=[^&\s]+/gi, "key=***").slice(0, 400);
 }
 
+function hint(value: string | undefined): string | undefined {
+  const text = (value ?? "").trim();
+  return text.length >= 12 ? `…${text.slice(-4)}` : text ? "••••" : undefined;
+}
+
+export type KeyTestResult = { ok: boolean; status: number; message: string; models?: number };
+
+/** Gọi endpoint liệt kê model (miễn phí, không tốn token) để kiểm tra một khóa. Không bao giờ trả lại giá trị khóa. */
+export async function testKey(
+  input: { provider?: string; key?: string; account?: string },
+  fetcher: typeof fetch = fetch,
+): Promise<KeyTestResult> {
+  const provider = input.provider;
+  const server = !input.key?.trim();
+  let key = (input.key ?? "").trim();
+  let account = (input.account ?? "").trim();
+  if (server) {
+    if (provider === "gemini") key = process.env.GEMINI_API_KEY ?? "";
+    else if (provider === "groq") key = process.env.GROQ_API_KEY ?? "";
+    else if (provider === "cloudflare") {
+      key = process.env.CLOUDFLARE_API_TOKEN ?? "";
+      account = process.env.CLOUDFLARE_ACCOUNT_ID ?? "";
+    }
+  } else if (provider === "cloudflare" && !account) account = process.env.CLOUDFLARE_ACCOUNT_ID ?? "";
+  if (!key) return { ok: false, status: 0, message: server ? "Server chưa có khóa này trong .env." : "Chưa nhập key." };
+
+  let url: string;
+  let headers: Record<string, string>;
+  if (provider === "gemini") {
+    url = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=50";
+    headers = { "x-goog-api-key": key };
+  } else if (provider === "groq") {
+    url = "https://api.groq.com/openai/v1/models";
+    headers = { authorization: `Bearer ${key}` };
+  } else if (provider === "cloudflare") {
+    if (!/^[0-9a-f]{32}$/i.test(account)) return { ok: false, status: 0, message: "Account ID Cloudflare gồm 32 ký tự hex." };
+    url = `https://api.cloudflare.com/client/v4/accounts/${account}/ai/models/search?per_page=5`;
+    headers = { authorization: `Bearer ${key}` };
+  } else return { ok: false, status: 0, message: "Nhà cung cấp không hợp lệ." };
+
+  try {
+    const response = await fetcher(url, { headers, signal: AbortSignal.timeout(10_000) });
+    const body = (await response.json().catch(() => ({}))) as {
+      models?: unknown[];
+      data?: unknown[];
+      result?: unknown[];
+      error?: { message?: string } | string;
+      errors?: { message?: string }[];
+    };
+    if (response.ok) {
+      const list = body.models ?? body.data ?? body.result ?? [];
+      return { ok: true, status: response.status, message: "Key dùng được.", models: Array.isArray(list) ? list.length : undefined };
+    }
+    const detail =
+      (typeof body.error === "string" ? body.error : body.error?.message) ?? body.errors?.[0]?.message ?? `HTTP ${response.status}`;
+    const reason = response.status === 401 || response.status === 403 ? "Key bị từ chối" : response.status === 429 ? "Key đang bị giới hạn (429)" : "Lỗi";
+    return { ok: false, status: response.status, message: safe(`${reason}: ${detail}`.split(key).join("***")) };
+  } catch (error) {
+    return { ok: false, status: 0, message: safe(`Không gọi được dịch vụ: ${error instanceof Error ? error.message : "lỗi mạng"}`.split(key).join("***")) };
+  }
+}
+
 function header(request: Request, name: string): string {
   return request.headers.get(name)?.trim() || "";
 }
@@ -37,9 +99,18 @@ export async function handleApi(request: Request): Promise<Response> {
       gemini: Boolean(process.env.GEMINI_API_KEY),
       groq: Boolean(process.env.GROQ_API_KEY),
       cloudflare: Boolean(process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID),
+      hints: {
+        gemini: hint(process.env.GEMINI_API_KEY),
+        groq: hint(process.env.GROQ_API_KEY),
+        cloudflare: hint(process.env.CLOUDFLARE_API_TOKEN),
+      },
       models: { gemini: ACTIVE_GEMINI_MODELS, groq: DEFAULT_GROQ_MODEL, cloudflare: DEFAULT_CF_MODEL },
       limits: DEFAULT_LIMITS,
     });
+  }
+  if (request.method === "POST" && (path.endsWith("/test-key") || path === "/api/test-key")) {
+    const body = (await request.json().catch(() => ({}))) as { provider?: string; key?: string; account?: string };
+    return json(await testKey(body));
   }
   if (request.method === "POST" && (path.endsWith("/generate") || path === "/api/generate")) {
     try {
@@ -85,7 +156,7 @@ type NetlifyEvent = {
   body: string | null;
 };
 
-export async function netlifyResponse(event: NetlifyEvent, route: "/api/health" | "/api/generate") {
+export async function netlifyResponse(event: NetlifyEvent, route: "/api/health" | "/api/generate" | "/api/test-key") {
   const headers = new Headers();
   for (const [key, value] of Object.entries(event.headers)) {
     if (value) headers.set(key, value);

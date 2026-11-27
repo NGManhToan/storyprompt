@@ -119,6 +119,11 @@ export type Provider = {
   lane: ProviderLane;
   model: string;
   available: boolean;
+  /** Khóa API nào đang đứng sau lane này (nhiều khóa → nhiều slot cùng lane). Không phải giá trị khóa. */
+  keyId?: string;
+  keyLabel?: string;
+  /** Khóa lưu bộ đếm ngày (RPD/neuron) cho slot này; mặc định là tên lane. */
+  usageKey?: string;
   generate: (req: GenerateRequest, signal?: AbortSignal) => Promise<GenerateResponse>;
 };
 
@@ -143,6 +148,8 @@ export type RequestLog = {
   id: string;
   at: number;
   lane: string;
+  /** Nhãn khóa (không phải giá trị) khi lane có nhiều khóa. */
+  key?: string;
   model: string;
   kind: "bible" | "scenes";
   sceneIds: string[];

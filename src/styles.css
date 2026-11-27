@@ -57,3 +57,20 @@ main.empty{grid-template-columns:calc(46 * var(--u)) minmax(0,1fr)}
   main{padding-bottom:18px}
   .scene-head{margin-bottom:6px}
 }
+
+.keys{display:grid;gap:8px;border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--field)}
+.keys h3{margin:0;font-size:14px}
+.keys p{margin:0;font-size:12px;color:var(--muted)}
+.key-group{display:grid;gap:6px;border-top:1px solid var(--line);padding-top:8px}
+.key-group-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.key-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;font-size:12px}
+.key-row code{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:2px 6px}
+.key-row .switch{display:flex;align-items:center;gap:6px}
+.key-row .switch input[type=checkbox]{width:auto}
+.drawer .key-row .key-label{width:130px;padding:4px 8px}
+.key-row button,.key-actions button,.key-group-head button{padding:4px 10px;font-size:12px}
+.key-result{flex-basis:100%}
+.key-result.ok{color:var(--green)}
+.key-result.bad{color:#b3412b}
+.key-form{display:grid;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px}
+.key-actions{display:flex;gap:6px;flex-wrap:wrap}

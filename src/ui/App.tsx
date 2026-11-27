@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import type { SceneResult } from "../core/types.js";
 import { wrapPrompt } from "../core/export.js";
+import { KeyManager } from "./KeyManager.js";
 import { loadStills, saveStills } from "./storage.js";
 import { useStudio } from "./useStudio.js";
 
@@ -558,7 +559,7 @@ function SettingsDrawer({ studio, onClose }: { studio: ReturnType<typeof useStud
     <div className="scrim" onClick={onClose} role="presentation">
       <aside className="drawer" role="dialog" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
         <div className="editor-head"><h2 id="settings-title">Cài đặt</h2><button type="button" onClick={onClose}>Đóng</button></div>
-        <p>Khóa chỉ nằm trên trình duyệt này.</p>
+        
         <label>Lane ưu tiên<select value={settings.lane} onChange={(event) => set({ ...settings, lane: event.target.value as typeof settings.lane })}><option value="gemini">Gemini</option><option value="groq">Groq</option><option value="cloudflare">Cloudflare</option></select></label>
         <p>Hàng đợi chung: lô nào gặp lane đang rảnh thì chạy lane đó. Lane hết hạn mức hoặc lỗi sẽ tự nghỉ.</p>
         <div className="split">
@@ -569,7 +570,7 @@ function SettingsDrawer({ studio, onClose }: { studio: ReturnType<typeof useStud
         <label className="switch"><input type="checkbox" checked={settings.directBrowser} onChange={(event) => set({ ...settings, directBrowser: event.target.checked })} /><span>Gọi Gemini trực tiếp</span></label>
         <label className="switch"><input type="checkbox" checked={settings.fullScript !== false} onChange={(event) => set({ ...settings, fullScript: event.target.checked })} /><span>Gửi ngữ cảnh lân cận (±{settings.contextScenes ?? 4} cảnh)</span></label>
         <label className="switch"><input type="checkbox" checked={settings.bible} onChange={(event) => set({ ...settings, bible: event.target.checked })} /><span>Story bible</span></label>
-        <label>Gemini API key<input type="password" autoComplete="off" value={settings.geminiKey} onChange={(event) => set({ ...settings, geminiKey: event.target.value })} /></label>
+        <KeyManager settings={settings} set={set} health={studio.health} />
         <label>Model Gemini<input value={settings.geminiModel} onChange={(event) => set({ ...settings, geminiModel: event.target.value })} /></label>
         <label>Model dự phòng<input value={settings.geminiFallbacks} onChange={(event) => set({ ...settings, geminiFallbacks: event.target.value })} /></label>
         <div className="split">
@@ -578,7 +579,6 @@ function SettingsDrawer({ studio, onClose }: { studio: ReturnType<typeof useStud
           <label>RPD<input type="number" min={1} value={settings.rpd} onChange={(event) => set({ ...settings, rpd: Number(event.target.value) })} /></label>
         </div>
         <p>Google không công bố số free tier; xem AI Studio → Rate limits và chỉnh cho khớp.</p>
-        <label>Groq API key<input type="password" autoComplete="off" value={settings.groqKey} onChange={(event) => set({ ...settings, groqKey: event.target.value })} /></label>
         <label>Model Groq<input value={settings.groqModel} onChange={(event) => set({ ...settings, groqModel: event.target.value })} /></label>
         <div className="split">
           <label>Groq RPM<input type="number" min={1} value={settings.groqRpm} onChange={(event) => set({ ...settings, groqRpm: Number(event.target.value) })} /></label>
@@ -586,8 +586,6 @@ function SettingsDrawer({ studio, onClose }: { studio: ReturnType<typeof useStud
           <label>OTPM<input type="number" min={1} value={settings.groqOtpm} onChange={(event) => set({ ...settings, groqOtpm: Number(event.target.value) })} /></label>
           <label>RPD<input type="number" min={1} value={settings.groqRpd} onChange={(event) => set({ ...settings, groqRpd: Number(event.target.value) })} /></label>
         </div>
-        <label>Cloudflare account id<input value={settings.cfAccount} onChange={(event) => set({ ...settings, cfAccount: event.target.value })} /></label>
-        <label>Cloudflare API token<input type="password" autoComplete="off" value={settings.cfToken} onChange={(event) => set({ ...settings, cfToken: event.target.value })} /></label>
         <label>Model Cloudflare<input value={settings.cfModel} onChange={(event) => set({ ...settings, cfModel: event.target.value })} /></label>
         <div className="split">
           <label>Cloudflare RPM<input type="number" min={1} value={settings.cfRpm} onChange={(event) => set({ ...settings, cfRpm: Number(event.target.value) })} /></label>

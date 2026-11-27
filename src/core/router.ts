@@ -16,6 +16,8 @@ type SlotState = {
   disabled?: string;
   exhausted?: string;
   failures: number;
+  /** Số lần liên tiếp model trả finish_reason=length mà không có hàng nào (vd. model suy luận ăn hết max_tokens). */
+  emptyCuts: number;
 };
 
 export type Router = {
@@ -23,7 +25,7 @@ export type Router = {
     request: GenerateRequest,
     attempt: number,
   ) => Promise<{ response: GenerateResponse; latencyMs: number }>;
-  state: () => { lane: string; model: string; coolUntil: number; disabled?: string; exhausted?: string }[];
+  state: () => { lane: string; key?: string; model: string; coolUntil: number; disabled?: string; exhausted?: string }[];
 };
 
 const MAX_TRIES = 10;
@@ -46,13 +48,14 @@ export function createRouter(args: {
   random?: () => number;
 }): Router {
   const slots = args.slots.filter((slot) => slot.provider.available);
-  const states = new Map<LaneSlot, SlotState>(slots.map((slot) => [slot, { coolUntil: 0, failures: 0 }]));
+  const states = new Map<LaneSlot, SlotState>(slots.map((slot) => [slot, { coolUntil: 0, failures: 0, emptyCuts: 0 }]));
 
   function log(slot: LaneSlot, request: GenerateRequest, attempt: number, extra: Partial<RequestLog>) {
     args.onLog({
       id: crypto.randomUUID(),
       at: args.now(),
       lane: slot.provider.lane,
+      key: slot.provider.keyLabel,
       model: slot.provider.model,
       kind: request.kind,
       sceneIds: request.sceneIds,
@@ -137,6 +140,13 @@ export function createRouter(args: {
         const response = neurons === undefined ? raw : { ...raw, neurons };
         lease.reconcile(response.usage.totalTokens || request.estimatedTokens, response.usage.outputTokens, neurons);
         state.failures = 0;
+        // Model suy luận có thể dùng hết max_tokens cho phần "nghĩ" và trả về rỗng: vẫn bị tính phí (neuron/token).
+        // Hai lần liên tiếp thì dừng lane để khỏi đốt hạn mức ngày vô ích.
+        if (response.finishReason.toLowerCase() === "length" && !response.text.includes("scene_id")) state.emptyCuts += 1;
+        else state.emptyCuts = 0;
+        if (state.emptyCuts >= 2 && !state.disabled) {
+          state.disabled = "model trả rỗng vì hết max_tokens (suy luận ăn hết ngân sách output) 2 lần liên tiếp, đã dừng lane để khỏi tốn hạn mức";
+        }
         return { response, latencyMs: Math.max(0, args.now() - started) };
       } catch (error) {
         lease.reconcile(1, 0, 0);
@@ -197,6 +207,7 @@ export function createRouter(args: {
         const state = states.get(slot)!;
         return {
           lane: slot.provider.lane,
+          key: slot.provider.keyLabel,
           model: slot.provider.model,
           coolUntil: state.coolUntil,
           disabled: state.disabled,

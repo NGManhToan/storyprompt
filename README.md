@@ -19,6 +19,13 @@ npm run dev
 
 Khóa tùy chọn trong `.env` (xem `.env.example`) hoặc dán trong **Cài đặt**. Khóa dán trên giao diện chỉ nằm trong `localStorage` của trình duyệt.
 
+### Quản lý khóa API (Cài đặt → Khóa API)
+
+- Mỗi nhà cung cấp (Gemini, Groq, Cloudflare Workers AI) có danh sách khóa riêng. Bấm **＋ Thêm key mới** để thêm khóa (nhãn tuỳ chọn; Cloudflare cần thêm Account ID).
+- Khóa hiển thị đã che (4 ký tự đầu + 4 ký tự cuối). Mỗi khóa có công tắc bật/tắt, nút **Kiểm tra** (gọi endpoint liệt kê model qua server cục bộ, không tốn token) và **Xoá**.
+- Khóa trong `.env` hiện thành dòng **Từ server (.env)** chỉ đọc (chỉ thấy 4 ký tự cuối), vẫn bật/tắt và kiểm tra được.
+- Mỗi khóa là một lane riêng với hạn mức, bộ đếm ngày và breaker 429 riêng. Khóa trước gặp 429 hoặc hết lượt ngày thì lô chuyển sang khóa kế tiếp.
+
 ## Cách dùng
 
 1. Thả file `.srt`. Nếu file có dòng `CẢNH n` / `SCENE n` / `INT.` / `EXT.`, các cue được gom thành cảnh. Không có tiêu đề thì mỗi cue là một cảnh.

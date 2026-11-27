@@ -1,17 +1,18 @@
 import type { Checkpoint } from "../core/pipeline.js";
 import { DEFAULT_LIMITS } from "../core/laneLimits.js";
+import { keysFromLegacy, type StoredKey } from "../core/keys.js";
 import type { RunSettings } from "../core/types.js";
 
 export type Settings = RunSettings & {
   lane: "gemini" | "groq" | "cloudflare";
   directBrowser: boolean;
-  geminiKey: string;
+  /** Danh sách khóa nhập trên trình duyệt (chỉ nằm ở localStorage). */
+  keys: StoredKey[];
+  /** Nhà cung cấp mà khóa server (.env) bị tắt: "gemini" | "groq" | "cloudflare". */
+  serverOff: string[];
   geminiModel: string;
   geminiFallbacks: string;
-  groqKey: string;
   groqModel: string;
-  cfAccount: string;
-  cfToken: string;
   cfModel: string;
   /** Hạn mức Gemini (free tier: số chưa công bố, xem AI Studio → Rate limits). */
   rpm: number;
@@ -32,13 +33,11 @@ export type Settings = RunSettings & {
 export const defaultSettings: Settings = {
   lane: "gemini",
   directBrowser: true,
-  geminiKey: "",
+  keys: [],
+  serverOff: [],
   geminiModel: "gemini-3.1-flash-lite",
   geminiFallbacks: "gemini-4-hydrogen",
-  groqKey: "",
   groqModel: "qwen/qwen3.8-27b",
-  cfAccount: "",
-  cfToken: "",
   cfModel: "@cf/qwen/qwen3.8-27b",
   batchSize: 4,
   concurrency: 6,
@@ -67,27 +66,40 @@ export const defaultSettings: Settings = {
   extraNames: "",
 };
 
-const SETTINGS_KEY = "storyprompt.settings.v3";
+const SETTINGS_KEY = "storyprompt.settings.v4";
+const PRIOR_SETTINGS_KEY = "storyprompt.settings.v3";
 const LEGACY_SETTINGS_KEY = "storyprompt.settings.v2";
 const THEME_KEY = "storyprompt.theme.v2";
 const USAGE_KEY = "storyprompt.usage.v1";
 
 export type DayUsage = { dayKey: string; count: number };
 
+type LegacyShape = Partial<Settings> & { geminiKey?: string; groqKey?: string; cfToken?: string; cfAccount?: string };
+
+/** v3 (một ô khóa mỗi nhà cung cấp) → v4 (danh sách khóa). Khóa cũ được giữ lại, các ô cũ bị bỏ khỏi settings. */
+export function migrateSettings(raw: LegacyShape): Settings {
+  const { geminiKey, groqKey, cfToken, cfAccount, ...rest } = raw;
+  const merged = { ...defaultSettings, ...rest } as Settings;
+  if (!Array.isArray(raw.keys)) merged.keys = keysFromLegacy({ geminiKey, groqKey, cfToken, cfAccount });
+  if (!Array.isArray(merged.serverOff)) merged.serverOff = [];
+  return merged;
+}
+
 export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) return { ...defaultSettings, ...JSON.parse(raw) };
+    if (raw) return migrateSettings(JSON.parse(raw));
+    const prior = localStorage.getItem(PRIOR_SETTINGS_KEY);
+    if (prior) return migrateSettings(JSON.parse(prior));
     const legacy = localStorage.getItem(LEGACY_SETTINGS_KEY);
     if (!legacy) return defaultSettings;
-    // v2 → v3: giữ khóa và tuỳ chỉnh nội dung, đổi model/hạn mức sang mặc định mới (chuỗi AI Studio).
-    const old = JSON.parse(legacy) as Partial<Settings>;
-    return {
-      ...defaultSettings,
-      geminiKey: old.geminiKey ?? "",
-      groqKey: old.groqKey ?? "",
-      cfAccount: old.cfAccount ?? "",
-      cfToken: old.cfToken ?? "",
+    // v2 → v4: giữ khóa và tuỳ chỉnh nội dung, đổi model/hạn mức sang mặc định mới (chuỗi AI Studio).
+    const old = JSON.parse(legacy) as LegacyShape;
+    return migrateSettings({
+      geminiKey: old.geminiKey,
+      groqKey: old.groqKey,
+      cfToken: old.cfToken,
+      cfAccount: old.cfAccount,
       directBrowser: old.directBrowser ?? defaultSettings.directBrowser,
       bible: old.bible ?? defaultSettings.bible,
       topic: old.topic ?? "",
@@ -95,7 +107,7 @@ export function loadSettings(): Settings {
       prefix: old.prefix ?? "",
       footer: old.footer ?? defaultSettings.footer,
       extraNames: old.extraNames ?? "",
-    };
+    });
   } catch {
     return defaultSettings;
   }

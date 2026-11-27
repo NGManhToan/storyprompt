@@ -86,6 +86,7 @@ describe("validators for Flow tags", () => {
 
   it("maps 'The Protagonist' to You when You is on the roster", () => {
     expect(normalizeVisibleCast(["The Protagonist", "narrator"], ROSTER)).toEqual(["You"]);
+    expect(normalizeVisibleCast(["@you", "@Derek"], ROSTER)).toEqual(["You", "Derek"]);
     expect(normalizeVisibleCast(["The Protagonist"], ["Derek"])).toEqual(["The Protagonist"]);
   });
 

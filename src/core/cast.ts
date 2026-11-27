@@ -157,7 +157,8 @@ const YOU_POSSESSIVE = /\b(?:your|yours|yourself|yourselves)\b/i;
  * Quy về chủ nhân nếu biết (Your/My → You); bộ phận không chủ thì bỏ, không title-case thành "Your Hand".
  */
 export function normalizeCastName(raw: string, knownNames: string[]): string | null {
-  const text = raw.normalize("NFC").replace(/\s+/g, " ").trim();
+  // Model đôi khi ghi luôn thẻ Flow vào visible_cast ("@you"): bỏ @ trước khi so roster.
+  const text = raw.normalize("NFC").replace(/\s+/g, " ").trim().replace(/^@+/, "");
   if (!text) return null;
   const known = knownNames.find((item) => eqName(item, text));
   if (known) return known;

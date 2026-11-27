@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { geminiQuotaWindow, geminiRetryDelayMs, rateLimitCooldownMs } from "../src/core/providers/gemini";
+import { geminiQuotaWindow, geminiRetryDelayMs, orderGeminiModels, rateLimitCooldownMs } from "../src/core/providers/gemini";
 import { cfReasoning } from "../src/core/providers/httpLanes";
 import { relaxSceneSchema, sceneSchemaFor, STRICT_SCHEMA_MAX_IDS } from "../src/core/prompts";
 import { ProviderError } from "../src/core/errors";
@@ -45,5 +45,13 @@ describe("cloudflare reasoning off", () => {
     expect(cfReasoning("@cf/qwen/qwen3.8-27b")).toEqual({ chat_template_kwargs: { enable_thinking: false } });
     expect(cfReasoning("@cf/google/gemma-4-26b-a4b-it")).toEqual({ chat_template_kwargs: { enable_thinking: false } });
     expect(JSON.stringify(cfReasoning("@cf/openai/gpt-oss-120b"))).toContain("low");
+  });
+});
+
+describe("last-retry model order", () => {
+  it("puts gemini-4-hydrogen first only when preferFallback is set", () => {
+    const chain = ["gemini-3.1-flash-lite", "gemini-4-hydrogen"];
+    expect(orderGeminiModels(chain)).toEqual(chain);
+    expect(orderGeminiModels(chain, true)).toEqual(["gemini-4-hydrogen", "gemini-3.1-flash-lite"]);
   });
 });

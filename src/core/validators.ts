@@ -1,4 +1,4 @@
-import { containsName, eqName, inferPresence, titleCaseName } from "./cast.js";
+import { eqName, inferPresence, mentionsName, normalizeVisibleCast } from "./cast.js";
 import type { Rejection, SceneDraft, SceneTask } from "./types.js";
 import { countWords } from "./types.js";
 
@@ -123,9 +123,7 @@ export function validateDraft(
   const rejections: Rejection[] = [];
   const prompt = draft.prompt?.trim() ?? "";
   const presence = inferPresence(task.source, knownNames);
-  const cast = (draft.visible_cast ?? [])
-    .map((name) => knownNames.find((item) => eqName(item, name)) ?? titleCaseName(name))
-    .filter(Boolean);
+  const cast = normalizeVisibleCast(draft.visible_cast, knownNames);
 
   if (VI_MARK.test(prompt) || VI_WORDS.test(prompt)) {
     rejections.push({ code: "wrongLanguage", detail: "Prompt phải là tiếng Anh." });
@@ -172,7 +170,7 @@ export function validateDraft(
         detail: `${name} không đứng trong cảnh này (chỉ được nhắc hoặc đã rời khung).`,
       });
     }
-    if (!containsName(prompt, name)) {
+    if (!mentionsName(prompt, name)) {
       rejections.push({
         code: "castInconsistent",
         detail: `${name} có trong visible_cast nhưng không xuất hiện trong prompt.`,
@@ -181,7 +179,7 @@ export function validateDraft(
   }
 
   for (const name of knownNames) {
-    if (containsName(prompt, name) && !cast.some((item) => eqName(item, name))) {
+    if (mentionsName(prompt, name) && !cast.some((item) => eqName(item, name))) {
       rejections.push({
         code: "castInconsistent",
         detail: `Prompt nhắc ${name} nhưng visible_cast không có tên đó.`,

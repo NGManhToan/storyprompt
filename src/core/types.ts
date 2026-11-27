@@ -99,7 +99,10 @@ export type GenerateRequest = {
   estimatedInputTokens?: number;
   /** Ước lượng token output cho lô này. */
   estimatedOutputTokens?: number;
+  /** Lần thử cuối: Gemini xếp model dự phòng (gemini-4-hydrogen) lên trước. */
+  preferFallbackModel?: boolean;
 };
+
 
 export type GenerateResponse = {
   text: string;

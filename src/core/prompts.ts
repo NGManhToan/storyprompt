@@ -293,6 +293,7 @@ export function buildSceneRequest(args: {
   contextWindow?: string;
   topic?: string;
   protagonist?: string;
+  preferFallbackModel?: boolean;
 }): GenerateRequest {
   const systemText = systemForScenes(Boolean(args.bible));
   const master = args.masterScript?.trim() ? clipMasterScript(args.masterScript) : null;
@@ -329,6 +330,7 @@ export function buildSceneRequest(args: {
     estimatedTokens: inputTokens + outputTokens,
     estimatedInputTokens: inputTokens,
     estimatedOutputTokens: outputTokens,
+    preferFallbackModel: args.preferFallbackModel,
   };
 }
 

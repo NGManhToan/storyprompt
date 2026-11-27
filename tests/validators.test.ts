@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { extractNames, inferPresence } from "../src/core/cast.js";
+import { extractNames, inferPresence, normalizeVisibleCast } from "../src/core/cast.js";
 import { parseSrt } from "../src/core/srt.js";
 import type { SceneDraft, SceneTask } from "../src/core/types.js";
 import { validateDraft, visualKey } from "../src/core/validators.js";
@@ -178,5 +178,51 @@ describe("validateDraft", () => {
     const codes = result.rejections.map((item) => item.code);
     expect(codes).toContain("borrowedAction");
     expect(codes).toContain("duplicateVisualKey");
+  });
+
+  it("maps Your Hand to You when You is on the roster, and does not invent Your Hand otherwise", () => {
+    const source =
+      "You reach out your left hand and press your index finger firmly against the power button of the 15-inch ThinkPad chassis, holding the contact point continuously.";
+    const prompt =
+      "A close-up view showing your hand as the index finger presses firmly against the power button of the corporate laptop, with warm daylight filtering across the clean wooden desk surface to illuminate the scene.";
+    const pov = task(source, "154");
+    const withYou = validateDraft(
+      draft({ prompt, visible_cast: ["your hand"], source_anchor: "You reach out your left hand and press your index finger firmly against the power button" }),
+      pov,
+      ["You", "Arthur"],
+      [],
+      new Map(),
+    );
+    expect(withYou.ok).toBe(true);
+    expect(normalizeVisibleCast(["your hand", "Your Left Hand"], ["You", "Arthur"])).toEqual(["You"]);
+
+    const withoutYou = validateDraft(
+      draft({ prompt, visible_cast: ["Your Hand"], source_anchor: "You reach out your left hand and press your index finger firmly against the power button" }),
+      pov,
+      ["Arthur", "Derek"],
+      [],
+      new Map(),
+    );
+    expect(withoutYou.ok).toBe(true);
+    expect(withoutYou.rejections.some((item) => item.code === "castAbsent")).toBe(false);
+    expect(normalizeVisibleCast(["Your Hand", "the hand"], ["Arthur"])).toEqual([]);
+  });
+
+  it("maps a possessive body part to the owner and still rejects a character who is only talked about", () => {
+    expect(normalizeVisibleCast(["Derek's hand", "derek's left arm"], ["Derek", "Chloe"])).toEqual(["Derek"]);
+    const scene = parsed.scenes[2];
+    const result = validateDraft(
+      draft({
+        scene_id: scene.sceneId,
+        prompt: "Lan and Minh sit with Hải at the table while the kettle cools, medium shot at eye level with shallow focus and a practical lamp.",
+        visible_cast: ["Lan", "Minh", "Hải's hand"],
+        source_anchor: "Lan và Minh ngồi đối diện.",
+      }),
+      task(scene.source, scene.sceneId),
+      names,
+      [],
+      new Map(),
+    );
+    expect(result.rejections.some((item) => item.code === "castAbsent" && item.detail.includes("Hải"))).toBe(true);
   });
 });

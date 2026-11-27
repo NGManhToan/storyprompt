@@ -1,4 +1,4 @@
-import { extractNames, inferPresence } from "./cast.js";
+import { extractNames, inferPresence, normalizeVisibleCast } from "./cast.js";
 import { isAbortError } from "./errors.js";
 import {
   bibleDigest,
@@ -297,6 +297,7 @@ export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
         contextWindow,
         topic: input.topic || input.settings.topic,
         protagonist: input.protagonist || input.settings.protagonist,
+        preferFallbackModel: attempt === maxAttempts && attempt > 1,
       });
       let response: GenerateResponse;
       let latencyMs = 0;
@@ -399,7 +400,7 @@ export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
             let first: { draft: SceneDraft; rejections: Rejection[] } | null = null;
             for (const row of rows) {
               const repaired = repairEnding(row.prompt);
-              const candidate = { ...row, prompt: repaired.prompt };
+              const candidate = { ...row, prompt: repaired.prompt, visible_cast: normalizeVisibleCast(row.visible_cast, knownNames) };
               const verdict = validateDraft(candidate, task, knownNames, neighborPrompts(task), seenKeys());
               if (verdict.ok) {
                 draft = candidate;

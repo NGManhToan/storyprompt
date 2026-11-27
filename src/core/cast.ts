@@ -139,6 +139,52 @@ export function inferPresence(source: string, knownNames: string[]): Presence {
   return { present, mentionedOnly };
 }
 
+const BODY_PART =
+  "(?:hands?|arms?|palms?|fingers?|fists?|wrists?|faces?|heads?|eyes?|shoulders?|backs?|chests?|bodies|body|feet|foot|legs?|thumbs?|necks?|index\\s+fingers?)";
+const BODY_MOD = "(?:left|right|bare|gloved|own|upper|lower|both)\\s+";
+const BARE_BODY = new RegExp(`^(?:(?:the|a|an)\\s+)?(?:${BODY_MOD})*${BODY_PART}$`, "iu");
+const YOUR_BODY = new RegExp(`^(?:your|my)\\s+(?:${BODY_MOD})*${BODY_PART}$`, "iu");
+const THEIR_BODY = new RegExp(`^(?:his|her|their)\\s+(?:${BODY_MOD})*${BODY_PART}$`, "iu");
+const NAME_BODY = new RegExp(
+  `^([\\p{L}][\\p{L}0-9'’.\\-]*(?:\\s+[\\p{L}][\\p{L}0-9'’.\\-]*){0,3})(?:'s|’s)\\s+(?:${BODY_MOD})*${BODY_PART}$`,
+  "iu",
+);
+const YOU_POSSESSIVE = /\b(?:your|yours|yourself|yourselves)\b/i;
+
+/**
+ * "Your Hand", "Derek's left arm" không phải nhân vật riêng.
+ * Quy về chủ nhân nếu biết (Your/My → You); bộ phận không chủ thì bỏ, không title-case thành "Your Hand".
+ */
+export function normalizeCastName(raw: string, knownNames: string[]): string | null {
+  const text = raw.normalize("NFC").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  const known = knownNames.find((item) => eqName(item, text));
+  if (known) return known;
+  if (BARE_BODY.test(text) || THEIR_BODY.test(text)) return null;
+  if (YOUR_BODY.test(text)) return knownNames.find((item) => eqName(item, "You")) ?? null;
+  const owned = text.match(NAME_BODY);
+  if (owned?.[1]) {
+    const owner = owned[1].trim();
+    return knownNames.find((item) => eqName(item, owner)) ?? titleCaseName(owner);
+  }
+  return titleCaseName(text);
+}
+
+export function normalizeVisibleCast(raw: string[] | undefined, knownNames: string[]): string[] {
+  const out: string[] = [];
+  for (const name of raw ?? []) {
+    const normalized = normalizeCastName(name, knownNames);
+    if (normalized && !out.some((item) => eqName(item, normalized))) out.push(normalized);
+  }
+  return out;
+}
+
+/** Giống containsName, thêm "your/yours/yourself" khi nhân vật là You (POV ngôi thứ nhất). */
+export function mentionsName(text: string, name: string): boolean {
+  if (containsName(text, name)) return true;
+  return eqName(name, "You") && YOU_POSSESSIVE.test(text);
+}
+
 export function splitExtraNames(value: string): string[] {
   return value
     .split(/[,;\n]/)

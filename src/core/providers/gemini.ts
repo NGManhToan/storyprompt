@@ -291,6 +291,13 @@ async function unaryOnce(args: {
  * 404 → nghỉ 60 phút, 429 → nghỉ 5 phút, 503/timeout/mạng → nghỉ 2 phút, 401/403 → dừng ngay.
  * Model khỏe xếp trước; khi cả chuỗi đang nghỉ thì trả 503 kèm retryAfter để bộ định tuyến chuyển lane.
  */
+/** Lần thử cuối đưa model dự phòng (hydrogen) lên trước; flash-lite vẫn là phương án dự phòng. */
+export function orderGeminiModels(models: string[], preferFallback = false): string[] {
+  const resolved = resolveGeminiModels(models);
+  if (!preferFallback || resolved.length < 2) return resolved;
+  return [...resolved.slice(1), resolved[0]];
+}
+
 export async function generateGeminiRest(options: {
   apiKey: string;
   models: string[];
@@ -304,7 +311,7 @@ export async function generateGeminiRest(options: {
   maxRounds?: number;
 }): Promise<GenerateResponse> {
   if (!options.apiKey) throw new ProviderError("Thiếu Gemini API key.", { status: 401, lane: "gemini" });
-  const models = resolveGeminiModels(options.models);
+  const models = orderGeminiModels(options.models, options.request.preferFallbackModel);
   const fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
   const breaker = options.breaker ?? sharedBreaker;
   const now = options.now ?? (() => Date.now());

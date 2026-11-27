@@ -59,13 +59,13 @@ describe("mocked 20-scene run", () => {
     expect(provider.calls.some((call) => call.sceneIds.length === 20)).toBe(false);
     expect(Date.now() - started).toBeLessThan(30_000);
 
-    const handoff = toFlowHandoff(
-      parsed.scenes,
-      output.results,
-      "Cinematic 16:9 still,",
-      "No rendered text. Character appearance comes only from the reference images.",
-    );
-    expect(handoff.format).toBe("storyprompt-flow-v1");
+    const handoff = toFlowHandoff(parsed.scenes, output.results, {
+      prefix: "Cinematic 16:9 still,",
+      footer: "No rendered text. Character appearance comes only from the reference images.",
+      roster: output.knownNames,
+    });
+    expect(handoff.format).toBe("storyprompt-flow-v2");
+    expect(handoff.scenes.find((scene) => scene.id === "018")?.references).toEqual(["Lan"]);
     expect(handoff.scenes).toHaveLength(20);
     expect(handoff.scenes[0].prompt.startsWith("Cinematic 16:9 still,")).toBe(true);
     expect(handoff.scenes[0].prompt).toContain("reference images");

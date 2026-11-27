@@ -74,3 +74,7 @@ main.empty{grid-template-columns:calc(46 * var(--u)) minmax(0,1fr)}
 .key-result.bad{color:#b3412b}
 .key-form{display:grid;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px}
 .key-actions{display:flex;gap:6px;flex-wrap:wrap}
+
+.flow-refs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 12px 10px; }
+.flow-refs .tag { font-size: 12px; }
+.flow-refs .mini { margin-left: auto; width: auto; padding: 2px 10px; }

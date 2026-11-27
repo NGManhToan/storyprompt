@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { extractNames, inferPresence, splitExtraNames } from "../core/cast.js";
 import { buildScenes, type ChunkMode } from "../core/chunk.js";
 import { FatalRunError } from "../core/errors.js";
-import { toCopyText, toCsv, toFlowHandoff, toNumberedText } from "../core/export.js";
+import { toCopyText, toCsv, toFlowHandoff, toFlowSheet, toNumberedText, type FlowOptions } from "../core/export.js";
 import type { Checkpoint } from "../core/pipeline.js";
 import { runPipeline } from "../core/pipeline.js";
 import { createAbortableSleep, utcDay } from "../core/scheduler.js";
@@ -350,8 +350,12 @@ export function useStudio() {
     return stored;
   }
 
+  function flowOptions(): FlowOptions {
+    return { prefix: settings.prefix, footer: settings.footer, roster: knownNames, aspectRatio: settings.aspectRatio };
+  }
+
   async function copyAll() {
-    const text = toCopyText(scenes, results, settings.prefix, settings.footer);
+    const text = toCopyText(scenes, results, flowOptions());
     if (!text) {
       setToast("Chưa có prompt để chép");
       return;
@@ -364,22 +368,26 @@ export function useStudio() {
     }
   }
 
-  function download(kind: "json" | "txt" | "flow" | "numbered" | "csv") {
+  function download(kind: "json" | "txt" | "flow" | "flowsheet" | "numbered" | "csv") {
     const stamp = fileName.replace(/\.(srt|txt)$/i, "") || "storyprompt";
     let filename = `${stamp}.txt`;
     let body = "";
-    if (kind === "txt") body = toCopyText(scenes, results, settings.prefix, settings.footer);
+    if (kind === "txt") body = toCopyText(scenes, results, flowOptions());
+    if (kind === "flowsheet") {
+      filename = `${stamp}.flow.txt`;
+      body = toFlowSheet(scenes, results, flowOptions());
+    }
     if (kind === "numbered") {
       filename = `${stamp}.numbered.txt`;
-      body = toNumberedText(scenes, results, settings.prefix, settings.footer);
+      body = toNumberedText(scenes, results, flowOptions());
     }
     if (kind === "csv") {
       filename = `${stamp}.csv`;
-      body = toCsv(scenes, results, settings.prefix, settings.footer);
+      body = toCsv(scenes, results, flowOptions());
     }
     if (kind === "flow") {
       filename = `${stamp}.flow.json`;
-      body = JSON.stringify(toFlowHandoff(scenes, results, settings.prefix, settings.footer), null, 2);
+      body = JSON.stringify(toFlowHandoff(scenes, results, flowOptions()), null, 2);
     }
     if (kind === "json") {
       filename = `${stamp}.json`;
@@ -389,7 +397,7 @@ export function useStudio() {
       setToast("Chưa có nội dung để tải");
       return;
     }
-    const blob = new Blob([body], { type: kind === "txt" ? "text/plain" : "application/json" });
+    const blob = new Blob([body], { type: kind === "txt" || kind === "flowsheet" || kind === "numbered" ? "text/plain" : kind === "csv" ? "text/csv" : "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;

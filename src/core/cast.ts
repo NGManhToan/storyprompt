@@ -149,6 +149,7 @@ const NAME_BODY = new RegExp(
   `^([\\p{L}][\\p{L}0-9'’.\\-]*(?:\\s+[\\p{L}][\\p{L}0-9'’.\\-]*){0,3})(?:'s|’s)\\s+(?:${BODY_MOD})*${BODY_PART}$`,
   "iu",
 );
+const NARRATOR_LABEL = /^(?:the\s+)?(?:protagonist|narrator|main character|viewer|reader)$/iu;
 const YOU_POSSESSIVE = /\b(?:your|yours|yourself|yourselves)\b/i;
 
 /**
@@ -162,6 +163,11 @@ export function normalizeCastName(raw: string, knownNames: string[]): string | n
   if (known) return known;
   if (BARE_BODY.test(text) || THEIR_BODY.test(text)) return null;
   if (YOUR_BODY.test(text)) return knownNames.find((item) => eqName(item, "You")) ?? null;
+  // Nhãn chung cho người kể (model hay ghi "The Protagonist"): quy về You nếu roster có You.
+  if (NARRATOR_LABEL.test(text)) {
+    const you = knownNames.find((item) => eqName(item, "You"));
+    if (you) return you;
+  }
   const owned = text.match(NAME_BODY);
   if (owned?.[1]) {
     const owner = owned[1].trim();

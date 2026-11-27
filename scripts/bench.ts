@@ -10,6 +10,8 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractNames } from "../src/core/cast.js";
 import { buildScenes, type ChunkMode } from "../src/core/chunk.js";
+import { toFlowSheet } from "../src/core/export.js";
+import { FLOW_STYLE_FOOTER } from "../src/core/flow.js";
 import { cfNeurons, DEFAULT_LIMITS } from "../src/core/laneLimits.js";
 import { runPipeline } from "../src/core/pipeline.js";
 import { createMockProvider } from "../src/core/providers/mock.js";
@@ -49,7 +51,8 @@ while (scenes.length < count) {
   scenes = [...scenes, ...extra];
 }
 scenes = scenes.slice(0, count);
-const knownNames = extractNames(scenes.map((scene) => scene.source).join("\n"));
+const extraNames = (arg("names", "") ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+const knownNames = extractNames(scenes.map((scene) => scene.source).join("\n"), extraNames);
 
 const env = process.env;
 const present = {
@@ -118,7 +121,7 @@ const output = await runPipeline({
   signal: controller.signal,
   scenes,
   knownNames,
-  settings: { batchSize, concurrency, maxAttempts: 3, maxOutputTokens: 8192, bible: false, prefix: "", footer: "", fullScript: true, contextScenes: 4 },
+  settings: { batchSize, concurrency, maxAttempts: 3, maxOutputTokens: 16384, bible: false, prefix: "", footer: "", fullScript: true, contextScenes: 4 },
   lanes: slots.map((slot) => slot.provider),
   slots,
   onProgress: (event) => {
@@ -158,5 +161,10 @@ mkdirSync(dir, { recursive: true });
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 writeFileSync(
   join(dir, `${stamp}-${mock ? "mock" : slots.map((slot) => slot.provider.lane).join("+")}-${scenes.length}.json`),
-  JSON.stringify({ summary, logs: output.logs, results: output.results }, null, 2),
+  JSON.stringify({ summary, knownNames, logs: output.logs, results: output.results }, null, 2),
+);
+// Bản dán Flow (ảnh tham chiếu + prompt) để chấm bằng mắt.
+writeFileSync(
+  join(dir, `${stamp}-${mock ? "mock" : slots.map((slot) => slot.provider.lane).join("+")}-${scenes.length}.flow.txt`),
+  toFlowSheet(scenes, output.results, { prefix: "", footer: FLOW_STYLE_FOOTER, roster: knownNames, aspectRatio: "16:9" }),
 );

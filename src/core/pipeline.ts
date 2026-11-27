@@ -1,4 +1,5 @@
 import { extractNames, inferPresence, normalizeVisibleCast } from "./cast.js";
+import { tagCast } from "./flow.js";
 import { isAbortError } from "./errors.js";
 import {
   bibleDigest,
@@ -422,7 +423,7 @@ export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
             attempts,
             title: draft?.title || previous.title,
             environment: draft?.environment || "",
-            prompt: draft?.prompt || "",
+            prompt: draft?.prompt ? (accepted ? tagCast(draft.prompt, draft.visible_cast || []) : draft.prompt) : "",
             visibleCast: draft?.visible_cast || [],
             sourceAnchor: draft?.source_anchor || "",
             cameraAngle: draft?.camera_angle || previous.cameraAngle,

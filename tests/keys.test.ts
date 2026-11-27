@@ -221,3 +221,13 @@ describe("router: model suy luận trả rỗng vì hết max_tokens", () => {
     expect(router.state().find((row) => row.lane === "cloudflare")!.disabled).toMatch(/max_tokens/);
   });
 });
+
+describe("Flow defaults", () => {
+  it("pre-fills the five character names and swaps the legacy webtoon footer", () => {
+    const migrated = migrateSettings({ extraNames: "", footer: "modern 2D webtoon comic style, crisp ink line art, cel-shaded, warm daylight, clean frame, no text, 16:9" } as Partial<Settings>);
+    expect(migrated.extraNames).toBe("You, Derek, Chloe, Julian, Arthur");
+    expect(migrated.footer).toBe(defaultSettings.footer);
+    expect(migrated.aspectRatio).toBe("16:9");
+    expect(migrateSettings({ extraNames: "Lan, Minh" } as Partial<Settings>).extraNames).toBe("Lan, Minh");
+  });
+});

@@ -27,12 +27,13 @@ import {
   Trash2,
 } from "lucide-react";
 import type { SceneResult } from "../core/types.js";
-import { wrapPrompt } from "../core/export.js";
+import { composeFlowPrompt, FLOW_STYLE_FOOTER, referencesFor } from "../core/flow.js";
 import { KeyManager } from "./KeyManager.js";
 import { loadStills, saveStills } from "./storage.js";
 import { useStudio } from "./useStudio.js";
 
 const STYLES = [
+  { id: "flat", label: "2D phẳng (theo ảnh nhân vật)", prefix: "", footer: FLOW_STYLE_FOOTER },
   { id: "cinematic", label: "Cinematic", prefix: "", footer: "cinematic still, natural light, 16:9, no rendered text" },
   { id: "webtoon", label: "Webtoon", prefix: "", footer: "modern 2D webtoon comic style, crisp ink line art, cel-shaded, warm daylight, clean frame, no text, 16:9" },
   { id: "realistic", label: "Realistic", prefix: "", footer: "realistic live-action still, natural light, 16:9, no rendered text" },
@@ -99,7 +100,7 @@ export function App() {
       const text = await fetch("/fixtures/voice-fin-001.srt").then((response) => response.text());
       await studio.onFile(new File([text], "voice fin 001.srt", { type: "application/x-subrip" }));
       setStills({ "001": FIXTURE_STILLS });
-      const cinematic = STYLES[0];
+      const cinematic = STYLES.find((item) => item.id === "cinematic") ?? STYLES[0];
       studio.setSettings({ ...studio.settings, prefix: cinematic.prefix, footer: cinematic.footer });
     })();
   }, [studio]);
@@ -249,7 +250,8 @@ export function App() {
               <div className="menu-pop">
                 <button type="button" onClick={() => { void studio.copyAll(); setExportOpen(false); }}>Sao chép tất cả</button>
                 <button type="button" onClick={() => { studio.download("numbered"); setExportOpen(false); }}>TXT số</button>
-                <button type="button" onClick={() => { studio.download("flow"); setExportOpen(false); }}>Gói Flow</button>
+                <button type="button" title="Mỗi cảnh: danh sách ảnh tham chiếu cần gắn + prompt" onClick={() => { studio.download("flowsheet"); setExportOpen(false); }}>Flow (kèm ảnh tham chiếu)</button>
+                <button type="button" onClick={() => { studio.download("flow"); setExportOpen(false); }}>Gói Flow (JSON)</button>
                 <button type="button" onClick={() => { studio.download("json"); setExportOpen(false); }}>JSON</button>
                 <button type="button" onClick={() => { studio.download("csv"); setExportOpen(false); }}>CSV</button>
               </div>
@@ -412,8 +414,10 @@ function SceneWorkspace({
     return () => window.removeEventListener("keydown", onKey);
   }, [studio, sceneId, title, prompt, result?.environment, result?.visibleCast, onSaved]);
 
-  const styleId = STYLES.find((item) => item.footer === studio.settings.footer)?.id ?? "cinematic";
-  const shown = prompt ? wrapPrompt(prompt, studio.settings.prefix, studio.settings.footer) : "";
+  const styleId = STYLES.find((item) => item.footer === studio.settings.footer)?.id ?? "flat";
+  const cast = result?.visibleCast ?? [];
+  const shown = prompt ? composeFlowPrompt(prompt, cast, studio.settings.prefix, studio.settings.footer) : "";
+  const refs = referencesFor(cast, studio.knownNames);
   const status = bucket(result?.status);
   const src = images[Math.min(photo, Math.max(0, images.length - 1))];
 
@@ -464,6 +468,11 @@ function SceneWorkspace({
             <div className="field">
               <textarea id="prompt" placeholder="Chưa có prompt. Bấm Viết lại prompt để tạo từ lời thoại." value={prompt} onChange={(event) => onPrompt(event.target.value)} />
               <small id="promptCount">{prompt.length.toLocaleString("vi-VN")} / 2.000</small>
+            </div>
+            <div className="flow-refs" id="flowRefs">
+              <small>Ảnh tham chiếu gắn trong Flow:</small>{" "}
+              {refs.length ? refs.map((name) => <span key={name} className="tag">@{name}</span>) : <small>(không có nhân vật)</small>}
+              <button className="mini" type="button" title="Chép prompt Flow (đã gắn @tên + phong cách)" onClick={() => onCopy(shown || prompt)}>Chép cho Flow</button>
             </div>
           </article>
         </div>
@@ -596,7 +605,10 @@ function SettingsDrawer({ studio, onClose }: { studio: ReturnType<typeof useStud
           <label>Luồng {settings.concurrency}<input type="range" min={1} max={12} value={settings.concurrency} onChange={(event) => set({ ...settings, concurrency: Number(event.target.value) })} /></label>
         </div>
         <label>Hậu tố<textarea rows={2} value={settings.footer} onChange={(event) => set({ ...settings, footer: event.target.value })} /></label>
-        <label>Tên thêm<input value={settings.extraNames} onChange={(event) => set({ ...settings, extraNames: event.target.value })} /></label>
+        <label>Nhân vật (trùng tên ảnh tham chiếu trong Flow)<input value={settings.extraNames} onChange={(event) => set({ ...settings, extraNames: event.target.value })} /></label>
+        <label>Tỷ lệ khung Flow<select value={settings.aspectRatio} onChange={(event) => set({ ...settings, aspectRatio: event.target.value })}>
+          {["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"].map((ratio) => <option key={ratio} value={ratio}>{ratio}</option>)}
+        </select></label>
       </aside>
     </div>
   );

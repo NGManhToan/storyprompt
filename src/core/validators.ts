@@ -147,10 +147,16 @@ export function validateDraft(
     rejections.push({ code: "overlayText", detail: "Prompt đang yêu cầu chữ trên hình." });
   }
 
-  if (/@\w+/.test(prompt) || /#[0-9a-f]{3,8}\b/i.test(prompt)) {
+  // @Tên chỉ hợp lệ với tên trong roster (Flow chọn ảnh tham chiếu theo @tên asset); mã màu vẫn cấm.
+  const strayTags = [...prompt.matchAll(/@([\p{L}][\p{L}\p{N}_]*)/gu)]
+    .map((match) => match[1])
+    .filter((tag) => !knownNames.some((name) => eqName(name, tag)));
+  if (strayTags.length || /#[0-9a-f]{3,8}\b/i.test(prompt)) {
     rejections.push({
       code: "appearanceOverride",
-      detail: "Không dùng @tag hay mã màu. Ngoại hình để ảnh tham chiếu của Flow.",
+      detail: strayTags.length
+        ? `@${strayTags[0]} không có trong danh sách nhân vật. Chỉ gắn @ cho tên trong roster.`
+        : "Không dùng mã màu. Ngoại hình để ảnh tham chiếu của Flow.",
     });
   }
 

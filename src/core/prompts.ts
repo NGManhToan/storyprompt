@@ -145,14 +145,16 @@ If several scenes stay in one room, rotate the camera: a point-of-view interacti
 Change location only when the script moves or a cutaway is required.
 
 LOOK:
-Modern 2D webtoon, clean ink line, cel-shaded, warm daylight, calm. Do not write the style footer yourself. Code appends it.
-prompt: one English sentence of 28 to 42 words. Concrete action happening now, the place, the light, and the camera. End with a period.
+Flat 2D cartoon illustration that must match the character reference images (clean outlines, flat colors). Do not write the style footer yourself. Code appends it.
+prompt: one English sentence of 28 to 42 words, in this order: camera framing, who (tagged) does what action now, the place implied by the line, then the light. End with a period.
 No dialogue, quotations, subtitles, captions, readable signs, or title cards.
 
 LOCKED NAMES:
-Use the roster names only. Never describe skin, face, hair, age, body, clothes, or colors of people. Reference images carry appearance.
-Do not attach an at-sign to a name. Do not write hex color codes. For a hand shot, name whose hand it is and the action, with no color.
-If a protagonist name is configured, use that name for the narrator's body. Do not replace them with "a hand" or "a person".
+Use the roster names only. Never describe skin, face, hair, age, body, clothes, or colors of people. Reference images carry appearance (Google Flow attaches one reference image per tagged name).
+Tag every on-camera roster character with an at-sign exactly as spelled in the roster, e.g. "@Name", and use third-person verbs: "@Name presses the button", "@Name's hand holds the card". Never put an at-sign on anything that is not a roster name. Do not write hex color codes.
+For a hand shot, write whose hand it is with the tag, e.g. "point-of-view shot of @Name's hand", and the action, with no color.
+Never replace a roster character with "a hand", "a person", "someone" or "the protagonist".
+If a protagonist name is configured, use that name for the narrator's body.
 
 visible_cast: only bodies inside the frame.
 environment: short English location.
@@ -302,6 +304,9 @@ export function buildSceneRequest(args: {
     args.topic?.trim() ? `VIDEO TOPIC: ${args.topic.trim()}` : "",
     `ROSTER (names only, no appearance): ${args.knownNames.join(", ") || "(discover from the sources)"}`,
     args.protagonist?.trim() ? `PROTAGONIST NAME (locked token, no appearance): ${args.protagonist.trim()}` : "",
+    args.knownNames.some((name) => name.toLowerCase() === "you")
+      ? 'NARRATOR: the narration is second person, and "You" is a roster character with a reference image. When this scene\'s source has "you" acting, show @You: "point-of-view shot of @You\'s hand ...", "over-the-shoulder shot from behind @You ...", or "medium shot of @You ...". List "You" in visible_cast. When the line is a cutaway to another named character\'s action, show that character instead.'
+      : "",
     context
       ? `STORY CONTEXT WINDOW (spatial anchor only. Do not depict actions from scenes you are not writing.):\n${context}`
       : master

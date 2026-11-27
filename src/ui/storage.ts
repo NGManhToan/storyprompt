@@ -1,3 +1,4 @@
+import { DEFAULT_CHARACTERS, FLOW_STYLE_FOOTER } from "../core/flow.js";
 import type { Checkpoint } from "../core/pipeline.js";
 import { DEFAULT_LIMITS } from "../core/laneLimits.js";
 import { keysFromLegacy, type StoredKey } from "../core/keys.js";
@@ -28,7 +29,11 @@ export type Settings = RunSettings & {
   cfRpm: number;
   cfNeuronStop: number;
   extraNames: string;
+  /** Tỷ lệ khung chọn trong Flow (không ghi vào prompt). */
+  aspectRatio: string;
 };
+
+const LEGACY_FOOTER = "modern 2D webtoon comic style, crisp ink line art, cel-shaded, warm daylight, clean frame, no text, 16:9";
 
 export const defaultSettings: Settings = {
   lane: "gemini",
@@ -64,8 +69,10 @@ export const defaultSettings: Settings = {
   topic: "",
   protagonist: "",
   prefix: "",
-  footer: "modern 2D webtoon comic style, crisp ink line art, cel-shaded, warm daylight, clean frame, no text, 16:9",
-  extraNames: "",
+  footer: FLOW_STYLE_FOOTER,
+  // Tên khớp ảnh nhân vật bạn tải lên Flow (You.png, Derek.jpg, Chloe.jpg, Julian.jpg, Arthur.jpg).
+  extraNames: DEFAULT_CHARACTERS.join(", "),
+  aspectRatio: "16:9",
 };
 
 const SETTINGS_KEY = "storyprompt.settings.v4";
@@ -87,6 +94,10 @@ export function migrateSettings(raw: LegacyShape): Settings {
   // Lô ≤ 8 là mặc định cũ (nguyên nhân chính của 160+ request); đưa về lô lớn đã đo.
   if (!Number.isFinite(merged.batchSize) || merged.batchSize <= 8) merged.batchSize = defaultSettings.batchSize;
   if (merged.maxOutputTokens === 8192) merged.maxOutputTokens = defaultSettings.maxOutputTokens;
+  if (!merged.extraNames?.trim()) merged.extraNames = defaultSettings.extraNames;
+  if (!merged.aspectRatio) merged.aspectRatio = defaultSettings.aspectRatio;
+  // Hậu tố webtoon cũ (mặc định trước đây) → khối phong cách theo ảnh nhân vật.
+  if (merged.footer === LEGACY_FOOTER) merged.footer = defaultSettings.footer;
   return merged;
 }
 

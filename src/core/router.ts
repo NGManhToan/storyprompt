@@ -33,7 +33,8 @@ const MAX_NAP_MS = 15_000;
 function estimateOf(slot: LaneSlot, request: GenerateRequest): Estimate {
   const input = request.estimatedInputTokens ?? Math.ceil(request.estimatedTokens * 0.7);
   const output = request.estimatedOutputTokens ?? Math.max(0, request.estimatedTokens - input);
-  return { input, output, neurons: slot.neurons ? slot.neurons(input, output) : 0 };
+  // Neuron ước theo trần output (max_tokens) để không bao giờ vượt ngưỡng dừng sau khi đối soát số thật.
+  return { input, output, neurons: slot.neurons ? slot.neurons(input, Math.max(output, request.maxOutputTokens)) : 0 };
 }
 
 export function createRouter(args: {

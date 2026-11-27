@@ -156,6 +156,12 @@ export function createRouter(args: {
           log(slot, request, attempt, { latencyMs, error: message });
           continue;
         }
+        if (status === 429 && /per day|\bTPD\b|\bRPD\b|daily|neurons?/i.test(message)) {
+          // Hết hạn mức NGÀY (vd. Groq TPD 200K, Cloudflare 10.000 neuron): nghỉ lane tới hết lượt, để lane khác nhận.
+          state.exhausted = `hết hạn mức ngày: ${message.slice(0, 120)}`;
+          log(slot, request, attempt, { latencyMs, finishReason: "rate_limit", status: "rate_limited", error: `429 ngày: ${message}` });
+          continue;
+        }
         if (status === 429) {
           const wait = retryAfter !== undefined ? Math.max(0, retryAfter) : COOLDOWN_MS.rateLimited;
           state.coolUntil = args.now() + wait;

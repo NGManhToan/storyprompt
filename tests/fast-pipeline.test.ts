@@ -375,3 +375,31 @@ describe("overlayText bắt chữ trên màn hình", () => {
     expect(verdict.rejections.map((r) => r.code)).toContain("overlayText");
   });
 });
+
+describe("router: hết hạn mức ngày", () => {
+  it("429 'tokens per day' tắt lane, lô sang lane khác ngay", async () => {
+    const time = clock();
+    let groqCalls = 0;
+    const groq: Provider = {
+      lane: "groq", model: "q", available: true,
+      async generate(): Promise<GenerateResponse> {
+        groqCalls += 1;
+        throw new ProviderError("Rate limit reached on tokens per day (TPD)", { status: 429, lane: "groq", retryAfterMs: 424_000 });
+      },
+    };
+    const cf: Provider = {
+      lane: "cloudflare", model: "c", available: true,
+      async generate(): Promise<GenerateResponse> {
+        return { text: "{}", finishReason: "stop", model: "c", lane: "cloudflare", usage: { promptTokens: 1, outputTokens: 1, totalTokens: 2 } };
+      },
+    };
+    const sched = () => createScheduler({ rpm: 100, tpm: 1_000_000, rpd: 100, now: time.now, sleep: time.sleep });
+    const router = createRouter({ slots: [{ provider: groq, scheduler: sched() }, { provider: cf, scheduler: sched() }], now: time.now, sleep: time.sleep, onLog: () => undefined });
+    const start = time.now();
+    expect((await router.call(request(["001"]), 1)).response.lane).toBe("cloudflare");
+    expect((await router.call(request(["002"]), 1)).response.lane).toBe("cloudflare");
+    expect(groqCalls).toBe(1);
+    expect(time.now() - start).toBeLessThan(1_000);
+    expect(router.state().find((row) => row.lane === "groq")?.exhausted).toBeTruthy();
+  });
+});

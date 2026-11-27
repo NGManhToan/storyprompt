@@ -12,6 +12,9 @@ const STOP = new Set([
   "field", "soft", "fill", "key", "rim", "natural", "light", "lighting", "color", "grade",
   "photo", "photoreal", "reference", "image", "images", "rendered", "text", "appearance",
   "quiet", "clear", "steady", "measured", "grounded", "visible", "immediate", "concrete",
+  // Từ máy quay / bố cục: trùng giữa hai cảnh cùng địa điểm không phải là mượn hành động.
+  "static", "view", "captures", "capturing", "shows", "showing", "where", "frame", "framed", "scene",
+  "angle", "composition", "atmosphere", "mood", "present", "people", "empty", "there",
 ]);
 
 const VI_MARK = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
@@ -26,6 +29,14 @@ const DANGLING =
   /\b(?:and|or|but|with|to|of|for|the|a|an|in|on|at|from|into|onto)\s*[.!?]$/i;
 
 export type Verdict = { ok: boolean; rejections: Rejection[] };
+
+/** "no people present", "nobody", "without anyone"… là phủ định, không phải thêm người lạ vào khung. */
+const NEGATED_PEOPLE =
+  /\b(?:no|without(?:\s+any)?|empty of|free of|devoid of|absent of|not a single)\s+(?:other\s+)?(?:people|person|persons|figures?|crowds?|one|man|woman|stranger)\b|\bnobody\b|\bno-one\b/gi;
+
+export function hasUnnamedCharacter(prompt: string): boolean {
+  return UNNAMED.test(prompt.replace(NEGATED_PEOPLE, " "));
+}
 
 /**
  * Sửa kết câu khi model chỉ quên dấu chấm (finish_reason = stop).
@@ -144,7 +155,7 @@ export function validateDraft(
     });
   }
 
-  if (UNNAMED.test(prompt)) {
+  if (hasUnnamedCharacter(prompt)) {
     rejections.push({
       code: "unnamedCharacter",
       detail: presence.present.length
@@ -200,10 +211,13 @@ export function validateDraft(
     );
   }
 
-  const grams = fourGrams(contentWords(prompt));
+  // Bỏ từ mô tả địa điểm của chính cảnh (environment) trước khi so 4-gram: cùng địa điểm thì được, cùng hành động thì không.
+  const place = new Set(contentWords(draft.environment ?? ""));
+  const actionWords = (text: string) => contentWords(text).filter((word) => !place.has(word));
+  const grams = fourGrams(actionWords(prompt));
   for (const neighbor of neighborPrompts) {
     if (neighbor.sceneId === task.sceneId) continue;
-    const shared = [...fourGrams(contentWords(neighbor.prompt))].find((gram) => grams.has(gram));
+    const shared = [...fourGrams(actionWords(neighbor.prompt))].find((gram) => grams.has(gram));
     if (shared) {
       borrow.push(`Cụm hành động trùng cảnh ${neighbor.sceneId}: “${shared}”.`);
       break;
@@ -223,4 +237,58 @@ export function validateDraft(
   }
 
   return { ok: rejections.length === 0, rejections };
+}
+
+/** Phản hồi viết lại bằng tiếng Anh, có mục tiêu cụ thể (model viết prompt tiếng Anh). */
+export function retryFeedback(rejections: Rejection[]): string {
+  const lines = new Set<string>();
+  for (const item of rejections) {
+    const before = lines.size;
+    switch (item.code) {
+      case "wordCount": {
+        const words = Number(/(\d+)/.exec(item.detail)?.[1] ?? 0);
+        lines.add(
+          words && words < 28
+            ? `The prompt had ${words} words; it must be 30-40 words (hard limit 28-42). Add concrete visual detail from THIS scene's source: subject, action, setting, light.`
+            : `The prompt had ${words || "too many"} words; it must be 30-40 words (hard limit 28-42). Cut filler, keep the action.`,
+        );
+        break;
+      }
+      case "wrongLanguage":
+        lines.add("Write the prompt in English only.");
+        break;
+      case "incompleteEnding":
+      case "truncated":
+        lines.add("End the prompt with a complete sentence and a period.");
+        break;
+      case "unnamedCharacter":
+        lines.add("Do not add unnamed people (man, woman, someone, crowd). Use roster names only, or show no person.");
+        break;
+      case "castAbsent":
+      case "castInconsistent":
+      case "castMissing":
+        lines.add(`Cast: ${item.detail} visible_cast must list exactly the named people shown in the prompt.`);
+        break;
+      case "borrowedAction":
+        lines.add("Depict only this scene's own action; do not reuse the neighbor scene's action or wording. source_anchor must be copied verbatim from this scene's SOURCE.");
+        break;
+      case "duplicateVisualKey":
+        lines.add("This image duplicates an earlier scene. Change the camera angle, framing and focal action.");
+        break;
+      case "overlayText":
+        lines.add("No readable text, captions or quoted words in the image.");
+        break;
+      case "appearanceOverride":
+        lines.add("No @tags, hex colors or appearance descriptions.");
+        break;
+      default:
+        lines.add(`${item.detail}`);
+    }
+    if (lines.size > before) {
+      const last = [...lines].pop()!;
+      lines.delete(last);
+      lines.add(`[${item.code}] ${last}`);
+    }
+  }
+  return [...lines].join(" ");
 }

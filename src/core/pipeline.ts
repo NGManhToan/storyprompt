@@ -28,7 +28,7 @@ import type {
   StoryBible,
 } from "./types.js";
 import { clamp, emptyResult } from "./types.js";
-import { canonSceneId, repairEnding, validateDraft, visualKey } from "./validators.js";
+import { canonSceneId, repairEnding, retryFeedback, validateDraft, visualKey } from "./validators.js";
 
 export type Checkpoint = {
   id: string;
@@ -257,9 +257,7 @@ export async function runPipeline(input: PipelineInput): Promise<RunOutput> {
           source: scene.source,
           likelyPresent: inferPresence(scene.source, knownNames).present,
           neighbors: neighborsOf(scenes, scene),
-          feedback: previous.rejections.length
-            ? previous.rejections.map((item) => `${item.code}: ${item.detail}`).join(" | ")
-            : undefined,
+          feedback: previous.rejections.length ? retryFeedback(previous.rejections) : undefined,
         };
       });
       await lock(async () => {

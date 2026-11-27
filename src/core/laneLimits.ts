@@ -51,7 +51,7 @@ export function outputBudget(scenes: number, cap: number): number {
   return Math.min(Math.max(256, cap), Math.max(1, scenes) * OUTPUT_TOKENS_PER_SCENE + OUTPUT_ENVELOPE);
 }
 
-/** Output dự kiến (không phải trần) để xếp hàng theo OTPM: ~175 token/hàng [SUY RA từ log C# ~71 token/hàng với schema 4 trường]. */
+/** Output dự kiến (không phải trần) để xếp hàng theo OTPM: ~126 token/hàng [ĐO: Groq qwen3.8-27b, 46 hàng, 5.785 token]. */
 export function expectedOutput(scenes: number): number {
-  return Math.max(1, scenes) * 175 + 40;
+  return Math.max(1, scenes) * 135 + 40;
 }

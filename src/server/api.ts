@@ -1,8 +1,11 @@
 import { ProviderError } from "../core/errors.js";
-import { generateGeminiRest } from "../core/providers/gemini.js";
+import { DEFAULT_LIMITS } from "../core/laneLimits.js";
+import { ACTIVE_GEMINI_MODELS, generateGeminiRest, resolveGeminiModels } from "../core/providers/gemini.js";
 import { generateCloudflare, generateGroq } from "../core/providers/httpLanes.js";
 import type { GenerateRequest, GenerateResponse } from "../core/types.js";
-import { geminiWithSdk } from "./geminiSdk.js";
+
+export const DEFAULT_GROQ_MODEL = "qwen/qwen3.8-27b";
+export const DEFAULT_CF_MODEL = "@cf/qwen/qwen3.8-27b";
 
 const cors: Record<string, string> = {
   "access-control-allow-origin": "*",
@@ -24,38 +27,6 @@ function header(request: Request, name: string): string {
   return request.headers.get(name)?.trim() || "";
 }
 
-function missingModel(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : "";
-  const status = error instanceof ProviderError ? error.status : 0;
-  return status === 404 || /not found|not supported|unknown model|is not available/i.test(message);
-}
-
-async function runGemini(apiKey: string, models: string[], request: GenerateRequest): Promise<GenerateResponse> {
-  let last: unknown;
-  let preferRest = false;
-  for (const model of models) {
-    if (!preferRest) {
-      try {
-        return await geminiWithSdk(apiKey, model, request);
-      } catch (error) {
-        last = error;
-        if (error instanceof ProviderError && (error.status === 401 || error.status === 403 || error.status === 429)) throw error;
-        if (missingModel(error)) continue;
-        preferRest = true;
-      }
-    }
-    try {
-      return await generateGeminiRest({ apiKey, models: [model], request });
-    } catch (error) {
-      last = error;
-      if (error instanceof ProviderError && (error.status === 401 || error.status === 403 || error.status === 429)) throw error;
-      if (missingModel(error)) continue;
-      throw error;
-    }
-  }
-  throw last instanceof Error ? last : new ProviderError("Gemini không phản hồi.", { status: 502, lane: "gemini" });
-}
-
 export async function handleApi(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -66,6 +37,8 @@ export async function handleApi(request: Request): Promise<Response> {
       gemini: Boolean(process.env.GEMINI_API_KEY),
       groq: Boolean(process.env.GROQ_API_KEY),
       cloudflare: Boolean(process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID),
+      models: { gemini: ACTIVE_GEMINI_MODELS, groq: DEFAULT_GROQ_MODEL, cloudflare: DEFAULT_CF_MODEL },
+      limits: DEFAULT_LIMITS,
     });
   }
   if (request.method === "POST" && (path.endsWith("/generate") || path === "/api/generate")) {
@@ -83,19 +56,17 @@ export async function handleApi(request: Request): Promise<Response> {
       const groqKey = header(request, "x-groq-key") || process.env.GROQ_API_KEY || "";
       const cfToken = header(request, "x-cf-token") || process.env.CLOUDFLARE_API_TOKEN || "";
       const cfAccount = header(request, "x-cf-account") || process.env.CLOUDFLARE_ACCOUNT_ID || "";
-      const models = (body.models?.length ? body.models : ["gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-flash-latest"])
-        .map((model) => model.trim())
-        .filter(Boolean);
+      const models = resolveGeminiModels(body.models ?? []);
       let result: GenerateResponse;
-      if (lane === "groq") result = await generateGroq({ apiKey: groqKey, model: body.groqModel || "llama-3.3-70b-versatile", request: body.request });
+      if (lane === "groq") result = await generateGroq({ apiKey: groqKey, model: body.groqModel || DEFAULT_GROQ_MODEL, request: body.request });
       else if (lane === "cloudflare") {
         result = await generateCloudflare({
           token: cfToken,
           accountId: cfAccount,
-          model: body.cfModel || "@cf/meta/llama-3.1-8b-instruct",
+          model: body.cfModel || DEFAULT_CF_MODEL,
           request: body.request,
         });
-      } else result = await runGemini(geminiKey, models, body.request);
+      } else result = await generateGeminiRest({ apiKey: geminiKey, models, request: body.request });
       return json(result);
     } catch (error) {
       if (error instanceof ProviderError) {

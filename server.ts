@@ -3,9 +3,13 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { handleApi } from "./src/server/api.js";
+import { loadEnvFiles } from "./src/server/env.js";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
+loadEnvFiles(root);
 const dist = join(root, "dist");
+// `--production` thay cho `NODE_ENV=production` để `npm start` chạy được trên Windows PowerShell/cmd.
+if (process.argv.includes("--production")) process.env.NODE_ENV = "production";
 const production = process.env.NODE_ENV === "production";
 const port = Number(process.env.PORT) || (production ? 8080 : 47222);
 

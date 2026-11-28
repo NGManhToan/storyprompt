@@ -100,7 +100,7 @@ export type FlowErrorKind = "rate" | "quota" | "auth" | "policy" | "missing-ref"
  */
 export function classifyFlowError(text: string): FlowErrorKind {
   const value = text.toLowerCase();
-  if (/too quickly|unusual activity|unusual_activity|\b403\b|too many requests|\b429\b|rate.?limit/.test(value)) return "rate";
+  if (/too quickly|unusual activity|unusual_activity|\b403\b|too many requests|\b429\b|rate.?limit|quá nhanh|hoạt động bất thường/.test(value)) return "rate";
   if (/daily limit|limit reached|reached your|quota|out of (?:credits|generations)|hết lượt|giới hạn hằng ngày|giới hạn hàng ngày/.test(value)) return "quota";
   if (/sign in|signed out|log in|đăng nhập/.test(value)) return "auth";
   if (/policy|safety|blocked|violat|chính sách|an toàn/.test(value)) return "policy";

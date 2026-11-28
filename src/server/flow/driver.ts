@@ -22,6 +22,7 @@ export const SEL = {
   pickerOption: "button.asset-item",
   pickerTitle: ".asset-title",
   mentionChip: ".mention-chip",
+  addMenu: "button.add-menu-trigger",
   imageTile: "flow-image-tile",
   pendingTile: "flow-pending-tile",
   alerts: "mat-snack-bar-container, .mat-mdc-snack-bar-container, .mdc-snackbar, [role='alert']",
@@ -30,7 +31,9 @@ export const SEL = {
 };
 
 /** Hình (ligature Material Symbols) của các nút — không phụ thuộc ngôn ngữ giao diện. */
-const LIG = { image: "image", submit: "arrow_forward", dropdown: "arrow_drop_down" };
+const LIG = { image: "image", submit: "arrow_forward", dropdown: "arrow_drop_down", upload: "upload" };
+
+export const SIGN_IN_MESSAGE = "Chưa đăng nhập Google Flow (hoặc đã bị đăng xuất). Bấm \"Đăng nhập Google Flow\" trong bảng Tạo ảnh: một cửa sổ Chrome sẽ hiện ra để bạn đăng nhập (chỉ cần một lần), rồi bấm \"Chạy tiếp\".";
 const ASPECT_LIG: Record<string, string> = {
   "16:9": "crop_16_9",
   "9:16": "crop_9_16",
@@ -51,14 +54,22 @@ export class FlowError extends Error {
 export type GenerateRequest = { prompt: string; references: string[]; model: FlowModel; aspect: string; projectUrl: string };
 export type GeneratedImage = { data: Buffer; mime: string; width?: number; height?: number; mediaId?: string; source?: string };
 
-export type FlowStatus = { browserOpen: boolean; signedIn: boolean | null; url?: string; inProject?: boolean };
+export type FlowStatus = { browserOpen: boolean; signedIn: boolean | null; url?: string; inProject?: boolean; window?: "headless" | "offscreen" | "visible" | null };
 
 export interface FlowDriver {
   status(): Promise<FlowStatus>;
+  /** Mở Chrome CÓ cửa sổ để bạn đăng nhập Google (chỉ cần một lần). */
   open(url?: string): Promise<void>;
   currentProjectUrl(): Promise<string | null>;
+  /**
+   * Trước khi tạo ảnh: tự mở Chrome ẩn (cùng hồ sơ đã đăng nhập), kiểm tra đăng nhập,
+   * và trả về project dùng được (project đã nhớ → project đang mở → project mới nhất → tạo mới).
+   */
+  prepare(projectUrl?: string): Promise<string>;
   generate(request: GenerateRequest, signal?: AbortSignal): Promise<GeneratedImage[]>;
   checkReferences(projectUrl: string, names: string[]): Promise<Record<string, boolean>>;
+  /** Tải một ảnh nhân vật từ máy lên project (tên tệp = tên nhân vật, vd. Derek.jpg). */
+  uploadReference(projectUrl: string, file: string): Promise<void>;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -122,7 +133,7 @@ export class PlaywrightFlowDriver implements FlowDriver {
       if (!page) return { browserOpen: true, signedIn: null };
       const url = page.url();
       const signedIn = await this.signedIn(page);
-      return { browserOpen: true, signedIn, url, inProject: /\/project\//.test(url) };
+      return { browserOpen: true, signedIn, url, inProject: /\/project\//.test(url), window: await this.browser.runningMode() };
     } catch {
       return { browserOpen: true, signedIn: null };
     }
@@ -138,6 +149,72 @@ export class PlaywrightFlowDriver implements FlowDriver {
   async open(url?: string) {
     await this.browser.open(url ?? FLOW_HOME);
     await this.browser.flowPage(url);
+    this.settingsKey = "";
+  }
+
+  async prepare(projectUrl?: string): Promise<string> {
+    const running = await this.browser.runningMode();
+    if (running === "visible") {
+      // Cửa sổ đăng nhập đang mở: chỉ chuyển sang chạy ẩn khi đã đăng nhập xong.
+      const page = await this.browser.flowPage(projectUrl || undefined);
+      await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+      if (!(await this.signedIn(page))) throw new FlowError("auth", SIGN_IN_MESSAGE);
+    }
+    await this.browser.ensureHidden(projectUrl || FLOW_HOME);
+    this.settingsKey = "";
+    const page = await this.browser.flowPage(projectUrl || undefined);
+    await this.waitSignedIn(page);
+    if (projectUrl) return projectUrl;
+    const current = await this.currentProjectUrl();
+    if (current) return current;
+    if (!/flow\.google\.com\/?(\?|$)/.test(page.url())) await page.goto(FLOW_HOME, { waitUntil: "domcontentloaded", timeout: 45_000 });
+    await page.locator("flow-projects-page").first().waitFor({ state: "attached", timeout: 30_000 }).catch(() => undefined);
+    await sleep(2500);
+    const latest = await js<string>(page, `() => { const a = document.querySelector('flow-project-card a[href*="/project/"]'); return a ? a.href : ''; }`);
+    if (latest) return latest.split(/[?#]/)[0];
+    // Chưa có project nào: tạo mới bằng nút "Dự án mới".
+    const add = page.locator("button.new-project-button").first();
+    await add.click({ timeout: 8000 }).catch(() => {
+      throw new FlowError("ui", "Không tìm thấy nút tạo project mới trong Flow.");
+    });
+    await page.waitForURL(/\/project\/[0-9a-f-]{20,}/i, { timeout: 30_000 }).catch(() => undefined);
+    const made = await this.currentProjectUrl();
+    if (!made) throw new FlowError("ui", "Không tạo được project mới trong Flow.");
+    return made;
+  }
+
+  /** Trang Flow có thể chuyển hướng vài giây sau khi mở: chờ tới khi biết chắc đã/chưa đăng nhập. */
+  private async waitSignedIn(page: Page) {
+    const until = Date.now() + 30_000;
+    while (Date.now() < until) {
+      const url = page.url();
+      if (/accounts\.google\.com|flow\.google\.com\/about/.test(url)) throw new FlowError("auth", SIGN_IN_MESSAGE);
+      if (await this.signedIn(page).catch(() => false)) return;
+      await sleep(1000);
+    }
+    throw new FlowError("auth", SIGN_IN_MESSAGE);
+  }
+
+  async uploadReference(projectUrl: string, file: string): Promise<void> {
+    const page = await this.page(projectUrl);
+    await page.keyboard.press("Escape").catch(() => undefined);
+    await page.locator(SEL.addMenu).first().click({ timeout: 8000 });
+    await sleep(1500);
+    const chooser = page.waitForEvent("filechooser", { timeout: 10_000 });
+    // Mục "Tải nội dung nghe nhìn lên" có ligature "upload" (không phụ thuộc ngôn ngữ).
+    const item = page.locator(`${SEL.overlay} mat-icon`).filter({ hasText: new RegExp(`^\\s*${LIG.upload}\\s*$`) }).first();
+    try {
+      await item.click({ timeout: 6000 });
+      await (await chooser).setFiles(file);
+    } catch {
+      await page.keyboard.press("Escape").catch(() => undefined);
+      throw new FlowError("ui", "Không mở được mục tải ảnh lên của Flow.");
+    }
+    await sleep(6000);
+    for (let i = 0; i < 2; i++) {
+      await page.keyboard.press("Escape").catch(() => undefined);
+      await sleep(300);
+    }
   }
 
   async currentProjectUrl(): Promise<string | null> {
@@ -148,14 +225,18 @@ export class PlaywrightFlowDriver implements FlowDriver {
   }
 
   private async page(projectUrl: string): Promise<Page> {
-    if (!(await this.browser.reachable())) throw new FlowError("auth", "Cửa sổ Chrome của Flow chưa mở. Bấm \"Kết nối Google Flow\".");
+    // Chrome bị tắt giữa chừng: tự mở lại ở chế độ ẩn với cùng hồ sơ.
+    if (!(await this.browser.reachable())) {
+      await this.browser.ensureHidden(projectUrl);
+      this.settingsKey = "";
+    }
     const page = await this.browser.flowPage(projectUrl);
     if (!page.url().startsWith(projectUrl)) {
       await page.goto(projectUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
       this.settingsKey = "";
     }
     if (page.url() !== this.settingsUrl) this.settingsKey = "";
-    if (/accounts\.google\.com|flow\.google\.com\/about/.test(page.url())) throw new FlowError("auth", "Chưa đăng nhập Google trong cửa sổ Chrome của Flow.");
+    if (/accounts\.google\.com|flow\.google\.com\/about/.test(page.url())) throw new FlowError("auth", SIGN_IN_MESSAGE);
     await this.dismissNoise(page);
     const composer = page.locator(SEL.composer).first();
     try {

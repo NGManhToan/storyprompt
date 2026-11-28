@@ -30,13 +30,14 @@ export function FlowPanel({ flow, scenes, names, label, onClose }: { flow: FlowH
   const status = flow.status;
   const summary = flow.summary;
   const [model, setModel] = useState("");
-  const [gapMin, setGapMin] = useState(60);
-  const [gapMax, setGapMax] = useState(120);
+  const [gapMin, setGapMin] = useState(30);
+  const [gapMax, setGapMax] = useState(45);
   const [link, setLink] = useState("");
   const [found, setFound] = useState<Record<string, boolean> | null>(null);
 
   useEffect(() => {
     void flow.refreshStatus();
+    void flow.refreshRefs();
     const timer = window.setInterval(() => void flow.refreshStatus(), 5000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -53,8 +54,24 @@ export function FlowPanel({ flow, scenes, names, label, onClose }: { flow: FlowH
   const pool = model === "nano-banana-pro" ? "pro" : "nb2";
   const quota = status?.quota[pool];
   const projectUrl = status?.config.projectUrl ?? "";
-  const ready = Boolean(status?.browserOpen && status?.signedIn && projectUrl);
+  const canRun = Boolean(status?.chrome !== false && !flow.busy);
   const job = flow.job;
+  const localRef = (name: string) => flow.refs.find((item) => item.name.toLowerCase() === name.toLowerCase());
+  const missingLocal = usedNames.filter((name) => !localRef(name));
+  const signedOut = status?.browserOpen && status.signedIn === false;
+  const flowLine = !status
+    ? "Đang kiểm tra…"
+    : !status.chrome
+      ? "Không tìm thấy Google Chrome trên máy."
+      : !status.browserOpen
+        ? "Chưa mở — bấm Tạo ảnh là app tự mở Flow chạy ẩn (không hiện cửa sổ)."
+        : status.signedIn
+          ? status.window === "visible"
+            ? "Đã đăng nhập. Khi tạo ảnh, app tự chuyển Flow sang chạy ẩn."
+            : "Đã đăng nhập · Flow đang chạy ẩn trên máy này."
+          : status.window === "visible"
+            ? "Cửa sổ đăng nhập đang mở: đăng nhập Google trong đó, xong quay lại đây bấm Tạo ảnh."
+            : "Chưa đăng nhập Google Flow.";
 
   return (
     <dialog open className="flow-panel" aria-label="Tạo ảnh bằng Google Flow">
@@ -62,31 +79,34 @@ export function FlowPanel({ flow, scenes, names, label, onClose }: { flow: FlowH
         <b><ImageIcon size={16} /> Tạo ảnh bằng Google Flow</b>
         <button type="button" aria-label="Đóng" onClick={onClose}><X size={16} /></button>
       </div>
-      <p className="flow-warn">App tự điều khiển Flow bằng tài khoản Google của bạn. Google không cho phép kiểu tự động này nên tài khoản có thể bị giới hạn hoặc khoá; bạn đã chọn chấp nhận rủi ro. App giãn cách mỗi ảnh và tự dừng khi Flow báo bất thường.</p>
+      <p className="flow-warn">App tự điều khiển Flow bằng tài khoản Google của bạn (chạy ẩn, không cần mở Flow). Google không cho phép kiểu tự động này nên tài khoản có thể bị giới hạn hoặc khoá; bạn đã chọn chấp nhận rủi ro. App giãn cách mỗi ảnh, nghỉ 30 phút khi Flow báo tạo quá nhanh, và dừng hẳn khi hết lượt hoặc mất đăng nhập.</p>
 
-      <ol className="flow-steps">
-        <li className={status?.browserOpen ? "ok" : undefined}>
-          <span>Mở cửa sổ Chrome riêng cho Flow {status && !status.chrome ? "(không tìm thấy Chrome trên máy)" : ""}</span>
-          <button type="button" disabled={flow.busy} onClick={() => void flow.connect()}>{status?.browserOpen ? "Mở lại / đưa lên trước" : "Kết nối Google Flow"}</button>
-        </li>
-        <li className={status?.signedIn ? "ok" : undefined}>
-          <span>Bạn tự đăng nhập Google trong cửa sổ đó (app không thấy mật khẩu). {status?.browserOpen ? (status.signedIn ? "Đã đăng nhập." : "Chưa thấy đăng nhập.") : ""}</span>
-        </li>
-        <li className={projectUrl ? "ok" : undefined}>
-          <span>Mở hoặc tạo một project trong Flow, tải ảnh nhân vật lên và đặt tên đúng: {usedNames.length ? usedNames.map((name) => <code key={name}>{name}</code>) : <code>You, Derek…</code>}</span>
-          <div className="flow-row">
-            <button type="button" disabled={flow.busy || !status?.browserOpen} onClick={() => void flow.useCurrent()}>Dùng project đang mở</button>
-            <input placeholder="hoặc dán link https://flow.google.com/project/…" value={link} onChange={(event) => setLink(event.target.value)} />
-            <button type="button" disabled={!link.trim() || flow.busy} onClick={() => void flow.setConfig({ projectUrl: link.trim() }).then(() => setLink(""))}>Lưu</button>
+      <div className="flow-steps">
+        <div className={status?.signedIn ? "ok" : undefined}>
+          <span>Google Flow: {flowLine}</span>
+          {status?.signedIn && status.window !== "visible" ? null : (
+            <button type="button" disabled={flow.busy || flow.running || status?.chrome === false} onClick={() => void flow.connect()}>{signedOut || status?.window === "visible" ? "Mở lại cửa sổ đăng nhập" : "Đăng nhập Google Flow (một lần)"}</button>
+          )}
+        </div>
+        {usedNames.length ? (
+          <div className={missingLocal.length ? undefined : "ok"} data-testid="flow-refs">
+            <span>Ảnh nhân vật (app tự tải lên Flow nếu project còn thiếu){missingLocal.length ? ` — còn thiếu: ${missingLocal.join(", ")}` : ""}</span>
+            <div className="flow-refs">
+              {usedNames.map((name) => {
+                const ref = localRef(name);
+                return (
+                  <label key={name} className={`flow-ref ${ref ? "ok" : "missing"}`}>
+                    {ref ? <img src={`/api/flow/refs/${encodeURIComponent(ref.name)}?v=${flow.refsRev}`} alt={name} /> : <span className="flow-ref-empty">+</span>}
+                    <b>{name}</b>
+                    <small>{ref ? "Đổi ảnh" : "Chọn ảnh"}</small>
+                    <input type="file" accept="image/png,image/jpeg,image/webp" aria-label={`Ảnh nhân vật ${name}`} disabled={flow.busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void flow.uploadRef(name, file); event.target.value = ""; }} />
+                  </label>
+                );
+              })}
+            </div>
           </div>
-          {projectUrl ? <small>Project: <a href={projectUrl} target="_blank" rel="noreferrer">{projectUrl.replace("https://", "")} <ExternalLink size={12} /></a></small> : null}
-        </li>
-        <li className={found && usedNames.every((name) => found[name]) ? "ok" : undefined}>
-          <span>Kiểm tra Flow có đủ ảnh tham chiếu</span>
-          <button type="button" disabled={!ready || flow.busy || flow.running || !usedNames.length} onClick={() => void flow.checkRefs(usedNames).then((body) => body && setFound(body.found))}>Kiểm tra</button>
-          {found ? <small>{usedNames.map((name) => `${found[name] ? "✓" : "✗"} ${name}`).join("  ")}</small> : null}
-        </li>
-      </ol>
+        ) : null}
+      </div>
 
       <div className="flow-settings">
         <label>Mô hình
@@ -105,16 +125,31 @@ export function FlowPanel({ flow, scenes, names, label, onClose }: { flow: FlowH
         <small>Ước tính chỉ để tham khảo [SUY RA]: {scenes.length} ảnh × ({gapMin}–{gapMax} giây nghỉ + thời gian Flow vẽ) ≈ {Math.round((scenes.length * gapMin) / 60)}–{Math.round((scenes.length * gapMax) / 60)} phút nghỉ, chưa tính thời gian vẽ.</small>
       </div>
 
+      <details className="flow-advanced">
+        <summary>Nâng cao: project Flow, kiểm tra ảnh nhân vật</summary>
+        <p>App tự dùng project đã nhớ, nếu chưa có thì lấy project mới nhất trong Flow (hoặc tạo mới).</p>
+        <div className="flow-row">
+          <button type="button" disabled={flow.busy || !status?.browserOpen} onClick={() => void flow.useCurrent()}>Dùng project đang mở</button>
+          <input placeholder="hoặc dán link https://flow.google.com/project/…" value={link} onChange={(event) => setLink(event.target.value)} />
+          <button type="button" disabled={!link.trim() || flow.busy} onClick={() => void flow.setConfig({ projectUrl: link.trim() }).then(() => setLink(""))}>Lưu</button>
+        </div>
+        {projectUrl ? <small>Project: <a href={projectUrl} target="_blank" rel="noreferrer">{projectUrl.replace("https://", "")} <ExternalLink size={12} /></a></small> : null}
+        <div className="flow-row">
+          <button type="button" disabled={!projectUrl || !status?.signedIn || flow.busy || flow.running || !usedNames.length} onClick={() => void flow.checkRefs(usedNames).then((body) => body && setFound(body.found))}>Kiểm tra ảnh trong Flow</button>
+          {found ? <small>{usedNames.map((name) => `${found[name] ? "✓" : "✗"} ${name}`).join("  ")}</small> : null}
+        </div>
+      </details>
+
       <div className="flow-actions">
         {flow.running ? (
           <button type="button" onClick={() => void flow.cancel()}><Pause size={14} /> Dừng</button>
         ) : (
-          <button className="primary" type="button" disabled={!ready || flow.busy || !scenes.length} onClick={() => void flow.start(label, model, scenes)}>
+          <button className="primary" type="button" disabled={!canRun || !scenes.length} onClick={() => void flow.start(label, model, scenes)}>
             <Play size={14} /> Tạo ảnh cho {scenes.length} cảnh
           </button>
         )}
-        {summary && !flow.running && summary.pending > 0 ? <button type="button" disabled={!ready || flow.busy} onClick={() => void flow.resume(false)}><Play size={14} /> Chạy tiếp ({summary.pending} cảnh)</button> : null}
-        {summary && !flow.running && summary.failed > 0 ? <button type="button" disabled={!ready || flow.busy} onClick={() => void flow.resume(true)}><RefreshCw size={14} /> Thử lại {summary.failed} cảnh lỗi</button> : null}
+        {summary && !flow.running && summary.pending > 0 ? <button type="button" disabled={!canRun} onClick={() => void flow.resume(false)}><Play size={14} /> Chạy tiếp ({summary.pending} cảnh)</button> : null}
+        {summary && !flow.running && summary.failed > 0 ? <button type="button" disabled={!canRun} onClick={() => void flow.resume(true)}><RefreshCw size={14} /> Thử lại {summary.failed} cảnh lỗi</button> : null}
         {summary && summary.images > 0 ? <a className="button" href={`/api/flow/jobs/${summary.id}/zip`} download><Download size={14} /> Tải tất cả (zip)</a> : null}
       </div>
       {flow.error ? <p className="flow-error" role="alert">{flow.error}</p> : null}
@@ -124,8 +159,9 @@ export function FlowPanel({ flow, scenes, names, label, onClose }: { flow: FlowH
           <b>{STATUS[summary.status] ?? summary.status}</b> · {summary.done}/{summary.total} cảnh có ảnh{summary.failed ? ` · ${summary.failed} lỗi` : ""}{summary.skipped ? ` · ${summary.skipped} bỏ qua` : ""} · {formatElapsed(summary.elapsedMs)}
           {summary.current ? <span> · đang vẽ cảnh #{summary.current}</span> : null}
           {summary.status === "waiting" ? <Countdown at={summary.nextAt} /> : null}
+          {summary.notice ? <p className="flow-note">{summary.notice}</p> : null}
           {summary.pauseReason ? <p className="flow-error">{summary.pauseReason}</p> : null}
-          {flow.running ? <small>Có thể đóng tab; server vẫn chạy. Đừng thao tác trong cửa sổ Chrome của Flow lúc app đang dán prompt.</small> : null}
+          {flow.running ? <small>Có thể đóng tab hoặc tắt màn hình; việc tạo ảnh chạy ngầm trên máy tính này (máy phải bật).</small> : null}
         </div>
       ) : null}
 

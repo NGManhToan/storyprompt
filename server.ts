@@ -8,7 +8,7 @@ import { JobManager } from "./src/server/jobs.js";
 import { handleJobsApi, isJobsPath } from "./src/server/jobsApi.js";
 import { loadEnvFiles } from "./src/server/env.js";
 import { handleFlowApi, isFlowPath } from "./src/server/flow/api.js";
-import { FlowBrowser } from "./src/server/flow/chrome.js";
+import { FlowBrowser, hiddenModeFromEnv } from "./src/server/flow/chrome.js";
 import { PlaywrightFlowDriver } from "./src/server/flow/driver.js";
 import { FlowImageManager } from "./src/server/flow/imageJobs.js";
 
@@ -27,7 +27,7 @@ for (const id of jobs.interruptedServerJobs()) {
   console.log(resumed.ok ? `[jobs] tự chạy tiếp ${id}` : `[jobs] không chạy tiếp được ${id}: ${resumed.error}`);
 }
 // Nút "Tạo ảnh": Chrome hồ sơ riêng .flow-profile/ (đăng nhập Google do bạn tự làm) + ảnh tạm ở flow-cache/ (cả hai gitignored).
-const flowBrowser = new FlowBrowser({ profileDir: process.env.STORYPROMPT_FLOW_PROFILE || join(root, ".flow-profile"), port: Number(process.env.STORYPROMPT_FLOW_CDP_PORT) || 9333 });
+const flowBrowser = new FlowBrowser({ profileDir: process.env.STORYPROMPT_FLOW_PROFILE || join(root, ".flow-profile"), port: Number(process.env.STORYPROMPT_FLOW_CDP_PORT) || 9333, hiddenMode: hiddenModeFromEnv() });
 const flowDriver = new PlaywrightFlowDriver(flowBrowser);
 const flowImages = new FlowImageManager({ dir: process.env.STORYPROMPT_FLOW_CACHE || join(root, "flow-cache"), driver: flowDriver });
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
@@ -103,7 +103,7 @@ const server = createServer(async (req, res) => {
         res.end(JSON.stringify({ error: "Tạo ảnh Flow chỉ dùng được trên chính máy chạy server." }));
         return;
       }
-      const body = req.method === "GET" || req.method === "HEAD" || req.method === "DELETE" ? undefined : await readBody(req, 4_000_000);
+      const body = req.method === "GET" || req.method === "HEAD" || req.method === "DELETE" ? undefined : await readBody(req, url.startsWith("/api/flow/refs/") ? 21_000_000 : 4_000_000);
       const headers = new Headers();
       for (const [key, value] of Object.entries(req.headers)) {
         if (typeof value === "string") headers.set(key, value);

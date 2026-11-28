@@ -7,6 +7,7 @@ export type FlowStatus = {
   signedIn: boolean | null;
   url?: string;
   inProject?: boolean;
+  window?: "headless" | "offscreen" | "visible" | null;
   config: { projectUrl: string; model: string; gapMinSec: number; gapMaxSec: number; aspect: string };
   quota: Record<"nb2" | "pro", { used: number; limit: number; left: number; resetAt?: number }>;
   models: { id: string; label: string }[];
@@ -27,11 +28,14 @@ export type FlowJobSummary = {
   images: number;
   pauseReason?: string;
   pauseKind?: string;
+  notice?: string;
   nextAt?: number;
   current?: string;
   elapsedMs: number;
   rev: number;
 };
+
+export type FlowRef = { name: string; file: string; bytes: number };
 
 export type FlowJobFull = { id: string; label: string; model: string; modelLabel: string; scenes: FlowSceneJob[]; logs: { at: number; text: string }[] };
 
@@ -57,6 +61,8 @@ export function useFlow(project: string) {
   const [job, setJob] = useState<FlowJobFull | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [refs, setRefs] = useState<FlowRef[]>([]);
+  const [refsRev, setRefsRev] = useState(0);
   const rev = useRef(-1);
 
   useEffect(() => {
@@ -75,6 +81,14 @@ export function useFlow(project: string) {
       setStatus(await call<FlowStatus>("/api/flow/status"));
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : String(problem));
+    }
+  }, []);
+
+  const refreshRefs = useCallback(async () => {
+    try {
+      setRefs((await call<{ refs: FlowRef[] }>("/api/flow/refs")).refs);
+    } catch {
+      /* bỏ qua */
     }
   }, []);
 
@@ -142,8 +156,22 @@ export function useFlow(project: string) {
     }
   }
 
+  async function uploadRef(name: string, file: File) {
+    return act(async () => {
+      const response = await fetch(`/api/flow/refs/${encodeURIComponent(name)}`, { method: "POST", headers: { "content-type": file.type || "application/octet-stream" }, body: file });
+      const body = (await response.json().catch(() => ({}))) as { refs?: FlowRef[]; error?: string };
+      if (!response.ok) throw new Error(body.error || `Lỗi ${response.status}`);
+      setRefs(body.refs ?? []);
+      setRefsRev((value) => value + 1);
+    });
+  }
+
   return {
     status,
+    refs,
+    refsRev,
+    refreshRefs,
+    uploadRef,
     jobId,
     summary,
     job,

@@ -80,6 +80,23 @@ export async function handleFlowApi(request: Request, manager: FlowImageManager,
     }
   }
 
+  // Ảnh nhân vật lưu trên máy (flow-cache/refs/), app tự tải lên Flow khi project còn thiếu.
+  if (parts[2] === "refs") {
+    const name = decodeURIComponent(parts[3] ?? "");
+    if (!name && method === "GET") return json({ refs: manager.listRefs() });
+    if (name && method === "POST") {
+      const data = Buffer.from(await request.arrayBuffer());
+      const saved = manager.saveRef(name, request.headers.get("content-type") ?? "", data);
+      return saved.ok ? json({ ok: true, refs: manager.listRefs() }) : json({ error: saved.error }, 400);
+    }
+    if (name && method === "GET") {
+      const path = manager.refFile(name);
+      if (!path) return json({ error: "Chưa có ảnh." }, 404);
+      return new Response(readFileSync(path), { status: 200, headers: { "content-type": MIME[extname(path).toLowerCase()] ?? "application/octet-stream", "cache-control": "no-store" } });
+    }
+    return json({ error: "Method không hỗ trợ." }, 405);
+  }
+
   if (parts[2] === "img" && method === "GET") {
     const path = manager.imagePath(parts[3] ?? "", parts[4] ?? "");
     if (!path) return json({ error: "Không có ảnh." }, 404);

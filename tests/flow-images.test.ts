@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { classifyFlowError, countGeneration, gapMs, matchRefTitle, normalizeProjectUrl, poolState, splitMentions } from "../src/core/flowImages.js";
 import { handleFlowApi } from "../src/server/flow/api.js";
+import { chromeArgs, hiddenModeFromEnv } from "../src/server/flow/chrome.js";
 import { FlowError, fullSizeSrc, newestTiles, type FlowDriver, type GenerateRequest } from "../src/server/flow/driver.js";
 import { FlowImageManager } from "../src/server/flow/imageJobs.js";
 import { buildZip, crc32 } from "../src/server/flow/zip.js";
@@ -91,12 +92,23 @@ class FakeDriver implements FlowDriver {
   async status() {
     return { browserOpen: true, signedIn: true, url: PROJECT, inProject: true };
   }
+  uploads: string[] = [];
+  prepared: (string | undefined)[] = [];
+  inFlow = new Set(["You", "Derek"]);
   async open() {}
   async currentProjectUrl() {
     return PROJECT;
   }
+  async prepare(url?: string) {
+    this.prepared.push(url);
+    return url || PROJECT;
+  }
   async checkReferences(_url: string, names: string[]) {
-    return Object.fromEntries(names.map((name) => [name, name !== "Arthur"]));
+    return Object.fromEntries(names.map((name) => [name, this.inFlow.has(name)]));
+  }
+  async uploadReference(_url: string, file: string) {
+    this.uploads.push(file);
+    this.inFlow.add(file.replace(/^.*[\\/]/, "").replace(/\.[a-z]+$/i, ""));
   }
   async generate(request: GenerateRequest) {
     this.calls.push(request);
@@ -148,23 +160,86 @@ describe("job ảnh Flow", () => {
     expect(job.status).toBe("done");
     expect(job.scenes.every((scene) => scene.images.length === 1)).toBe(true);
     expect(driver.calls.map((call) => call.model)).toEqual(["nano-banana-2.1", "nano-banana-2.1", "nano-banana-2.1"]);
-    expect(sleeps).toEqual([90_000, 90_000]);
+    expect(sleeps).toEqual([37_500, 37_500]);
     expect(manager.quota().nb2.used).toBe(3);
   });
 
-  it("Flow báo tạo quá nhanh thì dừng hẳn, không thử lại, chạy tiếp được", async () => {
+  it("Flow báo tạo quá nhanh: nghỉ 30 phút rồi tự chạy lại một lần", async () => {
     const driver = new FakeDriver();
     driver.failWith = [new FlowError("rate", "Flow báo: You're requesting generations too quickly")];
-    const { manager } = setup(driver);
+    const { manager, sleeps } = setup(driver);
+    const made = manager.create({ scenes: SCENES }) as { id: string };
+    await settle(manager);
+    const job = manager.get(made.id)!;
+    expect(job.status).toBe("done");
+    expect(sleeps).toContain(30 * 60_000);
+    expect(driver.calls).toHaveLength(4);
+  });
+
+  it("báo tạo quá nhanh lần hai thì dừng hẳn; bấm Chạy tiếp thì chạy lại", async () => {
+    const driver = new FakeDriver();
+    const rate = () => new FlowError("rate", "Flow báo: You're requesting generations too quickly");
+    driver.failWith = [rate(), rate()];
+    const { manager, sleeps } = setup(driver);
     const made = manager.create({ scenes: SCENES }) as { id: string };
     await settle(manager);
     const job = manager.get(made.id)!;
     expect(job.status).toBe("paused");
     expect(job.pauseKind).toBe("rate");
-    expect(driver.calls).toHaveLength(1);
+    expect(sleeps.filter((ms) => ms === 30 * 60_000)).toHaveLength(1);
     expect(manager.resume(made.id).ok).toBe(true);
     await settle(manager);
     expect(manager.get(made.id)!.status).toBe("done");
+  });
+
+  it("trước khi vẽ: tự tải ảnh nhân vật còn thiếu từ máy lên Flow", async () => {
+    const { manager, driver } = setup();
+    expect(manager.saveRef("Arthur", "image/png", PNG).ok).toBe(true);
+    expect(manager.saveRef("../x", "image/png", PNG).ok).toBe(false);
+    expect(manager.saveRef("Chloe", "text/html", PNG).ok).toBe(false);
+    const made = manager.create({ scenes: [...SCENES, { sceneId: "004", prompt: "@Arthur signs.", references: ["Arthur"] }] }) as { id: string };
+    await settle(manager);
+    expect(driver.uploads.map((file) => file.replace(/^.*[\\/]/, ""))).toEqual(["Arthur.png"]);
+    expect(manager.get(made.id)!.status).toBe("done");
+    expect(manager.listRefs().map((ref) => ref.name)).toEqual(["Arthur"]);
+  });
+
+  it("thiếu ảnh nhân vật cả trong Flow lẫn trên máy: dừng trước khi vẽ, nói rõ tên", async () => {
+    const { manager, driver } = setup();
+    const made = manager.create({ scenes: [{ sceneId: "001", prompt: "@Julian waves.", references: ["Julian"] }] }) as { id: string };
+    await settle(manager);
+    const job = manager.get(made.id)!;
+    expect(job.pauseKind).toBe("missing-ref");
+    expect(job.pauseReason).toContain("Julian");
+    expect(driver.calls).toHaveLength(0);
+  });
+
+  it("chưa chọn project: app tự chọn và nhớ", async () => {
+    const driver = new FakeDriver();
+    const { manager } = setup(driver);
+    manager.setConfig({ projectUrl: "" });
+    const made = manager.create({ scenes: SCENES }) as { id: string };
+    expect(made.id).toBeTruthy();
+    await settle(manager);
+    expect(manager.config.projectUrl).toBe(PROJECT);
+    expect(manager.get(made.id)!.projectUrl).toBe(PROJECT);
+  });
+
+  it("cấu hình cũ 60–120 giây được đổi sang mặc định mới 30–45 giây", () => {
+    const { manager, dir, driver } = setup();
+    manager.setConfig({ gapMinSec: 60, gapMaxSec: 120 });
+    const again = new FlowImageManager({ dir, driver });
+    expect([again.config.gapMinSec, again.config.gapMaxSec]).toEqual([30, 45]);
+  });
+
+  it("Chrome chạy ẩn bằng headless của chính Chrome, không giả user-agent", () => {
+    const headless = chromeArgs("/p", 9333, "headless", "https://flow.google.com/");
+    expect(headless).toContain("--headless=new");
+    expect(headless.join(" ")).not.toMatch(/user-agent|stealth|AutomationControlled/i);
+    expect(chromeArgs("/p", 9333, "visible", "https://flow.google.com/")).not.toContain("--headless=new");
+    expect(chromeArgs("/p", 9333, "offscreen", "x").join(" ")).toContain("--window-position=-3000,-3000");
+    expect(hiddenModeFromEnv(undefined)).toBe("headless");
+    expect(hiddenModeFromEnv("offscreen")).toBe("offscreen");
   });
 
   it("dừng khi hết hạn mức Pro", async () => {

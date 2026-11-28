@@ -97,9 +97,19 @@ body.dark .job-notice.run { background: #17254a; color: #a9c1ff; }
 .flow-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .flow-head b { display: inline-flex; gap: 8px; align-items: center; font-size: 16px; }
 .flow-warn { font-size: 12px; opacity: .8; margin: 8px 0 12px; }
-.flow-steps { display: grid; gap: 10px; padding-left: 20px; margin: 0 0 14px; }
-.flow-steps li { display: grid; gap: 6px; }
-.flow-steps li.ok > span::after { content: " ✓"; color: #16a34a; font-weight: 700; }
+.flow-steps { display: grid; gap: 12px; margin: 0 0 14px; }
+.flow-steps > div { display: grid; gap: 6px; justify-items: start; }
+.flow-steps > div.ok > span::after { content: " ✓"; color: #16a34a; font-weight: 700; }
+.flow-refs { display: flex; gap: 10px; flex-wrap: wrap; }
+.flow-ref { position: relative; display: grid; justify-items: center; gap: 2px; width: 84px; padding: 6px; border: 1px dashed rgba(127,127,127,.5); border-radius: 10px; cursor: pointer; font-size: 12px; }
+.flow-ref.ok { border-style: solid; border-color: #16a34a; }
+.flow-ref.missing { border-color: #dc2626; }
+.flow-ref img, .flow-ref-empty { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; display: grid; place-items: center; font-size: 28px; background: rgba(127,127,127,.12); }
+.flow-ref input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.flow-advanced { margin: 0 0 12px; font-size: 13px; }
+.flow-advanced > summary { cursor: pointer; opacity: .8; }
+.flow-advanced > * + * { margin-top: 8px; }
+.flow-note { color: #b45309; font-size: 13px; }
 .flow-steps code { margin: 0 3px; padding: 1px 6px; border-radius: 6px; background: rgba(127,127,127,.15); }
 .flow-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .flow-row input { flex: 1; min-width: 180px; }

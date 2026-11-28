@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { countGeneration, FLOW_MODELS, gapMs, modelInfo, normalizeProjectUrl, poolState, type FlowModel, type FlowUsage } from "../../core/flowImages.js";
 import { FlowError, type FlowDriver } from "./driver.js";
@@ -29,6 +29,10 @@ export type FlowJob = {
   scenes: FlowSceneJob[];
   pauseReason?: string;
   pauseKind?: string;
+  /** Thông báo khi đang chạy (vd. đang nghỉ 30 phút vì Flow báo tạo quá nhanh). */
+  notice?: string;
+  /** Đã dùng lượt tự nghỉ-rồi-chạy-lại sau "tạo quá nhanh" trong lượt chạy này chưa. */
+  cooldownUsed?: boolean;
   nextAt?: number;
   current?: string;
   elapsedMs: number;
@@ -39,7 +43,12 @@ export type FlowJob = {
 };
 export type FlowConfig = { projectUrl: string; model: FlowModel; gapMinSec: number; gapMaxSec: number; aspect: string };
 
-export const DEFAULT_CONFIG: FlowConfig = { projectUrl: "", model: "nano-banana-2.1", gapMinSec: 60, gapMaxSec: 120, aspect: "16:9" };
+export const DEFAULT_CONFIG: FlowConfig = { projectUrl: "", model: "nano-banana-2.1", gapMinSec: 30, gapMaxSec: 45, aspect: "16:9" };
+/** Khi Flow báo tạo quá nhanh / 403: nghỉ chừng này rồi tự chạy lại MỘT lần. */
+export const RATE_COOLDOWN_MS = 30 * 60_000;
+/** Tên ảnh nhân vật hợp lệ (cũng là tên tệp trong flow-cache/refs/). */
+export const REF_NAME_RE = /^[\p{L}\p{N}_-]{1,40}$/u;
+const REF_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
 /** Giãn cách tối thiểu cho phép chỉnh (giây): không cho chạy dồn dập. */
 export const MIN_GAP_SEC = 30;
 const RUNNING = new Set<FlowJobStatus>(["queued", "running", "waiting"]);
@@ -58,6 +67,7 @@ export type ManagerOptions = {
   now?: () => number;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   random?: () => number;
+  cooldownMs?: number;
 };
 
 function abortableSleep(ms: number, signal: AbortSignal) {
@@ -79,6 +89,8 @@ export class FlowImageManager {
   private readonly now: () => number;
   private readonly sleepFn: (ms: number, signal: AbortSignal) => Promise<void>;
   private readonly random: () => number;
+  private readonly cooldownMs: number;
+  readonly refsDir: string;
   private readonly jobs = new Map<string, FlowJob>();
   private active: { id: string; controller: AbortController } | null = null;
   private readonly queue: string[] = [];
@@ -91,9 +103,17 @@ export class FlowImageManager {
     this.now = options.now ?? Date.now;
     this.sleepFn = options.sleep ?? abortableSleep;
     this.random = options.random ?? Math.random;
+    this.cooldownMs = options.cooldownMs ?? RATE_COOLDOWN_MS;
+    this.refsDir = join(this.dir, "refs");
+    mkdirSync(this.refsDir, { recursive: true });
     mkdirSync(join(this.dir, "jobs"), { recursive: true });
     mkdirSync(join(this.dir, "img"), { recursive: true });
     this.config = { ...DEFAULT_CONFIG, ...this.readJson<Partial<FlowConfig>>("config.json", {}) };
+    // Mặc định cũ 60–120 giây → mặc định mới 30–45 giây (bạn đã chọn nhanh hơn, chấp nhận rủi ro).
+    if (this.config.gapMinSec === 60 && this.config.gapMaxSec === 120) {
+      this.config.gapMinSec = DEFAULT_CONFIG.gapMinSec;
+      this.config.gapMaxSec = DEFAULT_CONFIG.gapMaxSec;
+    }
     this.usage = this.readJson<FlowUsage>("usage.json", {});
     for (const name of readdirSync(join(this.dir, "jobs"))) {
       if (!name.endsWith(".json")) continue;
@@ -185,6 +205,7 @@ export class FlowImageManager {
       images: job.scenes.reduce((sum, scene) => sum + scene.images.length, 0),
       pauseReason: job.pauseReason,
       pauseKind: job.pauseKind,
+      notice: job.notice,
       nextAt: job.nextAt,
       current: job.current,
       elapsedMs: job.elapsedMs + (job.startedAt && RUNNING.has(job.status) ? this.now() - job.startedAt : 0),
@@ -200,8 +221,82 @@ export class FlowImageManager {
     return this.active?.id ?? null;
   }
 
+  /** Ảnh nhân vật đã có trên máy (flow-cache/refs/<Tên>.png|jpg|webp). */
+  refFile(name: string): string | null {
+    if (!REF_NAME_RE.test(name)) return null;
+    for (const ext of ["png", "jpg", "jpeg", "webp"]) {
+      const path = join(this.refsDir, `${name}.${ext}`);
+      if (existsSync(path)) return path;
+    }
+    return null;
+  }
+
+  listRefs(): { name: string; file: string; bytes: number }[] {
+    const out: { name: string; file: string; bytes: number }[] = [];
+    for (const file of readdirSync(this.refsDir)) {
+      const match = /^(.+)\.(png|jpe?g|webp)$/i.exec(file);
+      if (!match || !REF_NAME_RE.test(match[1])) continue;
+      out.push({ name: match[1], file, bytes: statSync(join(this.refsDir, file)).size });
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  saveRef(name: string, mime: string, data: Buffer): { ok: true } | { ok: false; error: string } {
+    if (!REF_NAME_RE.test(name)) return { ok: false, error: "Tên nhân vật không hợp lệ." };
+    const ext = REF_EXT[mime.split(";")[0].trim().toLowerCase()];
+    if (!ext) return { ok: false, error: "Chỉ nhận ảnh PNG, JPG hoặc WebP." };
+    if (!data.length || data.length > 20 * 1024 * 1024) return { ok: false, error: "Ảnh trống hoặc lớn hơn 20 MB." };
+    for (const old of ["png", "jpg", "jpeg", "webp"]) rmSync(join(this.refsDir, `${name}.${old}`), { force: true });
+    writeFileSync(join(this.refsDir, `${name}.${ext}`), data);
+    return { ok: true };
+  }
+
+  /**
+   * Trước khi vẽ: mở Chrome ẩn, chọn project, kiểm tra ảnh nhân vật trong project và
+   * tự tải lên ảnh còn thiếu từ máy. Trả về lỗi để dừng job, hoặc null nếu sẵn sàng.
+   */
+  private async preflight(job: FlowJob): Promise<{ kind: string; message: string } | null> {
+    try {
+      job.notice = "Đang mở Google Flow (chạy ẩn) và kiểm tra ảnh nhân vật…";
+      this.save(job);
+      const projectUrl = await this.driver.prepare(job.projectUrl || this.config.projectUrl || undefined);
+      if (projectUrl !== job.projectUrl) {
+        job.projectUrl = projectUrl;
+        this.log(job, `Dùng project ${projectUrl}`);
+      }
+      if (projectUrl !== this.config.projectUrl) this.setConfig({ projectUrl });
+      const names = [...new Set(job.scenes.filter((scene) => scene.status === "pending").flatMap((scene) => scene.references))];
+      if (!names.length) return null;
+      let found = await this.driver.checkReferences(projectUrl, names);
+      const missing = names.filter((name) => !found[name]);
+      const uploadable = missing.filter((name) => this.refFile(name));
+      for (const name of uploadable) {
+        job.notice = `Đang tải ảnh nhân vật ${name} lên Flow…`;
+        this.save(job);
+        await this.driver.uploadReference(projectUrl, this.refFile(name)!);
+        this.log(job, `Đã tải ảnh ${name} lên project`);
+      }
+      if (uploadable.length) found = await this.driver.checkReferences(projectUrl, names);
+      const still = names.filter((name) => !found[name]);
+      if (still.length) {
+        const noFile = still.filter((name) => !this.refFile(name));
+        return {
+          kind: "missing-ref",
+          message: noFile.length
+            ? `Thiếu ảnh nhân vật: ${noFile.join(", ")}. Chọn ảnh cho từng tên ở mục "Ảnh nhân vật" trong bảng Tạo ảnh, rồi bấm "Chạy tiếp".`
+            : `Đã tải ảnh ${still.join(", ")} lên nhưng Flow chưa nhận. Bấm "Chạy tiếp" để thử lại.`,
+        };
+      }
+      return null;
+    } catch (error) {
+      const kind = error instanceof FlowError ? error.kind : "unknown";
+      return { kind, message: error instanceof Error ? error.message : String(error) };
+    } finally {
+      job.notice = undefined;
+    }
+  }
+
   create(input: { label?: unknown; scenes?: unknown; model?: unknown }): { ok: true; id: string } | { ok: false; error: string } {
-    if (!this.config.projectUrl) return { ok: false, error: "Chưa chọn project Flow. Mở project trong cửa sổ Chrome của Flow rồi bấm \"Dùng project đang mở\"." };
     const rows = Array.isArray(input.scenes) ? input.scenes : [];
     const scenes: FlowSceneJob[] = [];
     const seen = new Set<string>();
@@ -288,6 +383,15 @@ export class FlowImageManager {
     job.startedAt = this.now();
     this.log(job, "Bắt đầu");
     this.save(job);
+    const blocked = await this.preflight(job);
+    if (signal.aborted) {
+      job.status = "cancelled";
+      return;
+    }
+    if (blocked) {
+      this.pause(job, blocked.kind, blocked.message);
+      return;
+    }
     let generic = 0;
     let first = true;
     while (!signal.aborted) {
@@ -362,10 +466,26 @@ export class FlowImageManager {
           }
           continue;
         }
-        // rate / quota / auth / missing-ref / unknown: dừng ngay, không thử lại.
         scene.status = "pending";
         scene.error = message;
-        this.pause(job, kind, message);
+        if (kind === "rate" && !job.cooldownUsed) {
+          // Flow báo tạo quá nhanh / 403: nghỉ hẳn một lúc rồi tự chạy lại MỘT lần (không né, không đổi tài khoản).
+          job.cooldownUsed = true;
+          const minutes = Math.round(this.cooldownMs / 60_000);
+          job.status = "waiting";
+          job.nextAt = this.now() + this.cooldownMs;
+          job.notice = `Flow báo tạo quá nhanh. App nghỉ ${minutes} phút rồi tự chạy lại một lần; nếu Flow vẫn báo thì dừng hẳn.`;
+          this.log(job, `${message} → nghỉ ${minutes} phút`);
+          this.save(job);
+          await this.sleepFn(this.cooldownMs, signal);
+          job.notice = undefined;
+          job.nextAt = undefined;
+          if (signal.aborted) break;
+          first = true;
+          continue;
+        }
+        // quota / auth / missing-ref / unknown, hoặc "quá nhanh" lần hai: dừng ngay, không thử lại.
+        this.pause(job, kind, kind === "rate" ? `${message} (đã nghỉ một lần mà Flow vẫn báo; bấm "Chạy tiếp" sau vài giờ).` : message);
         return;
       } finally {
         job.current = undefined;
@@ -412,6 +532,7 @@ export class FlowImageManager {
     job.status = "queued";
     job.pauseReason = undefined;
     job.pauseKind = undefined;
+    job.cooldownUsed = false;
     this.save(job);
     this.enqueue(id);
     return { ok: true };

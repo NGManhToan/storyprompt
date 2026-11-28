@@ -1,5 +1,5 @@
 import type { Locator, Page } from "playwright-core";
-import { classifyFlowError, modelInfo, splitMentions, type FlowErrorKind, type FlowModel } from "../../core/flowImages.js";
+import { classifyFlowError, matchRefTitle, modelInfo, splitMentions, type FlowErrorKind, type FlowModel } from "../../core/flowImages.js";
 import { FLOW_HOME, type FlowBrowser } from "./chrome.js";
 
 /**
@@ -8,7 +8,8 @@ import { FLOW_HOME, type FlowBrowser } from "./chrome.js";
  * Không gọi API nội bộ của Flow, không né reCAPTCHA, không giả dạng.
  *
  * Bộ chọn (selector) lấy từ ghi chép đo đạc của gflow-cli (MIT, github.com/ffroliva/gflow-cli,
- * tháng 9–11/2026) và PHẢI được đối chiếu trên giao diện thật của bạn; Flow đổi DOM thường xuyên.
+ * tháng 9–11/2026); đã đối chiếu trên giao diện thật (tiếng Việt) ngày 28/11/2026 — các bộ chọn
+ * và ligature không phụ thuộc ngôn ngữ. Flow đổi DOM thường xuyên.
  */
 export const SEL = {
   composer: "[contenteditable='true']",
@@ -18,7 +19,7 @@ export const SEL = {
   radio: "[role='radio']",
   menuItem: "[role='menuitem']",
   agentPressed: "button.agent-mode-chip[aria-pressed='true'], flow-agent-mode-switch button.switch[aria-pressed='true']",
-  pickerOption: "button.asset-item[role='option']",
+  pickerOption: "button.asset-item",
   pickerTitle: ".asset-title",
   mentionChip: ".mention-chip",
   imageTile: "flow-image-tile",
@@ -93,6 +94,18 @@ export function fullSizeSrc(src: string): string {
   const at = src.lastIndexOf("=");
   if (at > 0 && src.includes("/asb/") && !src.includes("?") && /^[A-Za-z0-9-]+$/.test(src.slice(at + 1))) return `${src.slice(0, at)}=s0`;
   return src;
+}
+
+/**
+ * Ô mới = các ô đứng TRƯỚC ô cũ đầu tiên (Flow xếp mới nhất lên đầu).
+ * Lưới ảo của Flow chỉ vẽ một phần; khi thêm ảnh, ô cũ chưa từng vẽ có thể hiện ra ở cuối —
+ * không được coi đó là ảnh mới (lỗi đo ngày 28/11/2026: cảnh 001 bị lấy kèm một ảnh cũ).
+ */
+export function newestTiles<T extends { id: string; src: string }>(tiles: T[], before: Set<string>): T[] {
+  if (!before.size) return tiles;
+  const firstOld = tiles.findIndex((tile) => before.has(tile.id || tile.src));
+  if (firstOld < 0) return [];
+  return tiles.slice(0, firstOld).filter((tile) => !before.has(tile.id || tile.src));
 }
 
 export class PlaywrightFlowDriver implements FlowDriver {
@@ -257,7 +270,7 @@ export class PlaywrightFlowDriver implements FlowDriver {
     await page.keyboard.type(name, { delay: 90 });
     await sleep(2500);
     const titles = await js<string[]>(page, `(sel) => [...document.querySelectorAll(sel.option)].map((o) => ((o.querySelector(sel.title) || o).textContent || '').trim())`, { option: SEL.pickerOption, title: SEL.pickerTitle });
-    const index = titles.findIndex((title) => title.toLowerCase() === name.toLowerCase());
+    const index = matchRefTitle(titles, name);
     if (index < 0) {
       await page.keyboard.press("Escape");
       throw new FlowError("missing-ref", `Project Flow không có ảnh tham chiếu tên "${name}"${titles.length ? ` (Flow gợi ý: ${titles.slice(0, 6).join(", ")})` : ""}.`);
@@ -300,6 +313,12 @@ export class PlaywrightFlowDriver implements FlowDriver {
     throw new FlowError("ui", "Nút tạo (mũi tên) của Flow không bật lên sau khi dán prompt.");
   }
 
+  /** Ảnh mới hiện ở đầu lưới; cuộn lên đầu để lưới ảo (cdk-virtual-scroll) không chèn ô cũ vào giữa. */
+  private async scrollGridTop(page: Page) {
+    await js(page, `() => { for (const el of document.querySelectorAll('cdk-virtual-scroll-viewport')) el.scrollTop = 0; }`).catch(() => undefined);
+    await sleep(600);
+  }
+
   private tiles(page: Page) {
     return js<Tile[]>(page, TILES_JS, { tile: SEL.imageTile, pending: SEL.pendingTile });
   }
@@ -327,6 +346,7 @@ export class PlaywrightFlowDriver implements FlowDriver {
   async generate(request: GenerateRequest, signal?: AbortSignal): Promise<GeneratedImage[]> {
     const page = await this.page(request.projectUrl);
     await this.applySettings(page, request.model, request.aspect);
+    await this.scrollGridTop(page);
     const before = new Set((await this.tiles(page)).map((tile) => tile.id || tile.src).filter(Boolean));
     const alertsBefore = new Set(await js<string[]>(page, ALERTS_JS, SEL.alerts));
     await this.typePrompt(page, request.prompt, request.references);
@@ -340,11 +360,12 @@ export class PlaywrightFlowDriver implements FlowDriver {
     let alertText = "";
     while (Date.now() - started < 180_000) {
       await sleep(2000);
-      const fresh = (await this.tiles(page)).filter((tile) => !before.has(tile.id || tile.src));
+      const fresh = newestTiles(await this.tiles(page), before);
       const ready = fresh.filter((tile) => !tile.pending && tile.src && tile.w > 0);
       if (ready.length && !fresh.some((tile) => tile.pending)) {
         const images: GeneratedImage[] = [];
-        for (const tile of ready.slice(0, 4)) {
+        // Cài đặt luôn là x1: chỉ lấy ô mới nhất, không bao giờ lấy thêm ô cũ.
+        for (const tile of ready.slice(0, 1)) {
           const image = await this.fetchImage(page, tile.src);
           if (image) images.push({ ...image, width: image.width ?? tile.w, height: image.height ?? tile.h, mediaId: tile.id || undefined });
         }
@@ -379,7 +400,7 @@ export class PlaywrightFlowDriver implements FlowDriver {
         await page.keyboard.type(name, { delay: 90 });
         await sleep(2500);
         const titles = await js<string[]>(page, `(sel) => [...document.querySelectorAll(sel.option)].map((o) => ((o.querySelector(sel.title) || o).textContent || '').trim())`, { option: SEL.pickerOption, title: SEL.pickerTitle });
-        out[name] = titles.some((title) => title.toLowerCase() === name.toLowerCase());
+        out[name] = matchRefTitle(titles, name) >= 0;
         await page.keyboard.press("Escape");
         await sleep(400);
       }

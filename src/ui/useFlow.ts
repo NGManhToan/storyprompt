@@ -100,6 +100,16 @@ export function useFlow(project: string) {
     void fetchJob(jobId);
   }, [jobId, fetchJob]);
 
+  // Job đang chạy ở server nhưng trình duyệt này chưa lưu id (tab mới, xoá dữ liệu, chạy từ API): nhận lại.
+  useEffect(() => {
+    void refreshStatus();
+  }, [refreshStatus]);
+  useEffect(() => {
+    if (jobId || !status?.activeJob) return;
+    remember(status.activeJob);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId, status?.activeJob]);
+
   const running = Boolean(summary && RUNNING.has(summary.status));
   useEffect(() => {
     if (!jobId || !running) return;

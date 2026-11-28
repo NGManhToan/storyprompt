@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { classifyFlowError, countGeneration, gapMs, normalizeProjectUrl, poolState, splitMentions } from "../src/core/flowImages.js";
+import { classifyFlowError, countGeneration, gapMs, matchRefTitle, normalizeProjectUrl, poolState, splitMentions } from "../src/core/flowImages.js";
 import { handleFlowApi } from "../src/server/flow/api.js";
-import { FlowError, fullSizeSrc, type FlowDriver, type GenerateRequest } from "../src/server/flow/driver.js";
+import { FlowError, fullSizeSrc, newestTiles, type FlowDriver, type GenerateRequest } from "../src/server/flow/driver.js";
 import { FlowImageManager } from "../src/server/flow/imageJobs.js";
 import { buildZip, crc32 } from "../src/server/flow/zip.js";
 
@@ -24,6 +24,28 @@ describe("tách @Tên", () => {
   });
   it("không cắt tên dài hơn và bỏ qua tên không có ảnh", () => {
     expect(splitMentions("@Youth and @Chloe", ["You"])).toEqual([{ text: "@Youth and @Chloe" }]);
+  });
+});
+
+describe("tìm ảnh tham chiếu trong Flow", () => {
+  it("ưu tiên tên trùng, rồi tên tệp, rồi tệp StoryPrompt_<Tên>_", () => {
+    const titles = ["Man standing on runway", "StoryPrompt_You_ee8b_67cc.png", "you.png", "You"];
+    expect(matchRefTitle(titles, "You")).toBe(3);
+    expect(matchRefTitle(titles.slice(0, 3), "you")).toBe(2);
+    expect(matchRefTitle(titles.slice(0, 2), "You")).toBe(1);
+    expect(matchRefTitle(["StoryPrompt_Youth_1.png", "Your desk"], "You")).toBe(-1);
+    expect(matchRefTitle(titles, "Derek")).toBe(-1);
+  });
+});
+
+describe("nhận ảnh mới trong lưới Flow", () => {
+  it("chỉ lấy ô đứng trước ô cũ đầu tiên, bỏ ô cũ hiện ra ở cuối lưới ảo", () => {
+    const t = (id: string) => ({ id, src: `s-${id}` });
+    const before = new Set(["a", "b"]);
+    expect(newestTiles([t("new"), t("a"), t("b"), t("old-hidden")], before).map((x) => x.id)).toEqual(["new"]);
+    expect(newestTiles([t("a"), t("b"), t("old-hidden")], before)).toEqual([]);
+    expect(newestTiles([t("x"), t("y")], before)).toEqual([]);
+    expect(newestTiles([t("x")], new Set()).map((x) => x.id)).toEqual(["x"]);
   });
 });
 

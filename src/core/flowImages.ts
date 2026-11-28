@@ -73,6 +73,24 @@ export function splitMentions(prompt: string, names: string[]): Segment[] {
   return out;
 }
 
+/**
+ * Tìm ảnh tham chiếu cho @Tên trong danh sách ô chọn của Flow.
+ * Ưu tiên tên trùng khớp ("Derek"), rồi tên tệp trùng ("Derek.png"),
+ * rồi tệp StoryPrompt tự đặt tên khi tải lên ("StoryPrompt_Derek_<mã>.png").
+ * Trả về vị trí trong danh sách, -1 nếu không có.
+ */
+export function matchRefTitle(titles: string[], name: string): number {
+  const want = name.trim().toLowerCase();
+  if (!want) return -1;
+  const clean = titles.map((title) => title.trim().toLowerCase());
+  const exact = clean.indexOf(want);
+  if (exact >= 0) return exact;
+  const stem = clean.findIndex((title) => title.replace(/\.(png|jpe?g|webp|gif|heic)$/i, "") === want);
+  if (stem >= 0) return stem;
+  const prefix = `storyprompt_${want}_`;
+  return clean.findIndex((title) => title.startsWith(prefix));
+}
+
 export type FlowErrorKind = "rate" | "quota" | "auth" | "policy" | "missing-ref" | "unknown";
 
 /**

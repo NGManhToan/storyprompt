@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { extractNames, inferPresence, splitExtraNames } from "../core/cast.js";
 import { buildScenes, type ChunkMode } from "../core/chunk.js";
 import { FatalRunError } from "../core/errors.js";
-import { toCopyText, toCsv, toFlowHandoff, toFlowSheet, toNumberedText, type FlowOptions } from "../core/export.js";
+import type { FlowOptions } from "../core/export.js";
+import { toCopyText } from "../core/export.js";
+import { buildExport, type ExportKind } from "../core/exportKinds.js";
 import type { Checkpoint } from "../core/pipeline.js";
 import { runPipeline } from "../core/pipeline.js";
 import { createAbortableSleep, utcDay } from "../core/scheduler.js";
@@ -11,6 +13,8 @@ import type { RequestLog, RunReport, Scene, SceneResult, StoryBible } from "../c
 import { emptyResult, hashString } from "../core/types.js";
 import { pickAnchor } from "../core/providers/mock.js";
 import { validateDraft, visualKey } from "../core/validators.js";
+import { isUsable } from "../core/keys.js";
+import type { JobSummary } from "../server/jobs.js";
 import { buildLanes, buildSlots, type ServerHealth } from "./lanes.js";
 import {
   loadCheckpoint,
@@ -27,6 +31,35 @@ import {
 } from "./storage.js";
 
 export type Phase = "idle" | "ready" | "running" | "done" | "error";
+
+const JOB_KEY = "storyprompt.job.v1";
+const JOB_SEEN_KEY = "storyprompt.jobSeen.v1";
+export type JobNotice = { id: string; tone: "ok" | "warn"; text: string; elapsedMs: number; canResume: boolean };
+
+const RUNNING = new Set(["running", "queued"]);
+
+export function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return minutes ? `${minutes} phút ${seconds} giây` : `${seconds} giây`;
+}
+
+function lsGet(key: string): string {
+  try {
+    return localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+}
+function lsSet(key: string, value: string) {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch {
+    /* bỏ qua */
+  }
+}
 
 function projectId(fileName: string, text: string) {
   const slug = fileName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "kich-ban";
@@ -64,6 +97,13 @@ export function useStudio() {
   const [guideOpen, setGuideOpen] = useState(false);
   const [usage, setUsage] = useState(() => loadUsage());
   const abortRef = useRef<AbortController | null>(null);
+  // Chạy nền ở server: trình duyệt chỉ theo dõi.
+  const [job, setJob] = useState<JobSummary | null>(null);
+  const [jobs, setJobs] = useState<JobSummary[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [jobNotice, setJobNotice] = useState<JobNotice | null>(null);
+  const jobRev = useRef(0);
+  const jobAttached = useRef("");
   const [lastMode, setLastMode] = useState<"mock" | "live">("mock");
 
   useEffect(() => {
@@ -87,6 +127,42 @@ export function useStudio() {
     const timer = window.setInterval(() => setTick(Date.now()), 400);
     return () => window.clearInterval(timer);
   }, [phase]);
+
+  // Mở lại trang: nối lại lượt chạy gần nhất (đang chạy hoặc đã xong) để nhận kết quả.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has("fixture")) return;
+    void (async () => {
+      let id = lsGet(JOB_KEY);
+      if (!id) {
+        try {
+          const response = await fetch("/api/jobs", { cache: "no-store" });
+          const list = response.ok ? ((await response.json()) as { jobs: JobSummary[] }).jobs : [];
+          // Chưa từng mở: chỉ tự nối nếu có lượt đang chạy.
+          id = list.find((item) => RUNNING.has(item.status))?.id ?? "";
+        } catch {
+          id = "";
+        }
+      }
+      if (id) await attachJob(id);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!job || !RUNNING.has(job.status)) return;
+    const id = job.id;
+    const timer = window.setInterval(() => void fetchJob(id, false), 1500);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.id, job?.status]);
+
+  useEffect(() => {
+    const restore = () => {
+      if (!document.hidden && document.title.startsWith("✅")) document.title = "StoryPrompt";
+    };
+    document.addEventListener("visibilitychange", restore);
+    return () => document.removeEventListener("visibilitychange", restore);
+  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -117,6 +193,11 @@ export function useStudio() {
       return;
     }
     const detected = extractNames(parsed.scenes.map((scene) => scene.source).join("\n"), splitExtraNames(settings.extraNames));
+    // File mới: bỏ nối với lượt chạy nền cũ (lượt đó vẫn chạy ở server, mở lại từ Lịch sử).
+    jobAttached.current = "";
+    lsSet(JOB_KEY, "");
+    setJob(null);
+    setJobNotice(null);
     setFileName(name);
     setProject(projectId(name, text));
     setRawText(text);
@@ -184,8 +265,204 @@ export function useStudio() {
     setNames((current) => (current.some((item) => item.localeCompare(next, "vi", { sensitivity: "accent" }) === 0) ? current : [...current, next]));
   }
 
+  /** Gom cập nhật từ server vào state: cảnh bạn đã sửa tay (edited) không bị ghi đè. */
+  function applyJob(payload: Record<string, unknown>, first: boolean) {
+    const summary = payload.summary as JobSummary;
+    setJob(summary);
+    const running = RUNNING.has(summary.status);
+    if (running) setStartedAt(Date.now() - summary.elapsedMs);
+    if (!payload.unchanged) {
+      jobRev.current = summary.rev;
+      const serverResults = (payload.results as SceneResult[]) ?? [];
+      if (first) {
+        setScenes((payload.scenes as Scene[]) ?? []);
+        setFileName(summary.fileName);
+        setProject(summary.id);
+        setRawText("");
+        setWarnings([]);
+        setBible(null);
+        setResumeOffer(null);
+        setResults(serverResults);
+      } else {
+        setResults((current) => serverResults.map((row) => (current.find((item) => item.sceneId === row.sceneId)?.status === "edited" ? current.find((item) => item.sceneId === row.sceneId)! : row)));
+      }
+      setLogs((payload.logs as RequestLog[]) ?? []);
+      setReport((payload.report as RunReport | undefined) ?? null);
+      setNames((payload.knownNames as string[]) ?? []);
+    }
+    setLastMode(summary.mode);
+    setLabel(summary.label);
+    if (running) {
+      setPhase("running");
+      return;
+    }
+    setPhase("done");
+    setError(summary.status === "error" ? summary.error ?? "" : "");
+    // Thông báo xong: hiện một lần cho mỗi lượt chạy (kể cả khi bạn mở lại tab sau đó).
+    if (lsGet(JOB_SEEN_KEY) !== summary.id) {
+      const text =
+        summary.status === "done"
+          ? `Xong lượt chạy · ${summary.accepted}/${summary.sceneCount} cảnh đạt · ${formatElapsed(summary.elapsedMs)}`
+          : summary.status === "cancelled"
+            ? `Đã dừng · ${summary.accepted}/${summary.sceneCount} cảnh đạt · ${formatElapsed(summary.elapsedMs)}`
+            : summary.status === "interrupted"
+              ? `Server đã khởi động lại giữa chừng · ${summary.accepted}/${summary.sceneCount} cảnh đã xong`
+              : `Lượt chạy dừng vì lỗi · ${summary.accepted}/${summary.sceneCount} cảnh đạt${summary.error ? ` · ${summary.error.slice(0, 120)}` : ""}`;
+      setJobNotice({ id: summary.id, tone: summary.status === "done" && summary.failed === 0 ? "ok" : "warn", text, elapsedMs: summary.elapsedMs, canResume: summary.status !== "done" || summary.failed > 0 });
+      try {
+        if (typeof Notification !== "undefined" && Notification.permission === "granted" && document.hidden) {
+          new Notification("StoryPrompt", { body: text });
+        }
+        if (document.hidden) document.title = `✅ ${text.slice(0, 60)}`;
+      } catch {
+        /* thông báo hệ thống không bắt buộc */
+      }
+    }
+  }
+
+  async function fetchJob(id: string, first: boolean): Promise<boolean> {
+    try {
+      const response = await fetch(`/api/jobs/${id}${first ? "" : `?rev=${jobRev.current}`}`, { cache: "no-store" });
+      if (response.status === 404) return false;
+      if (!response.ok) return true;
+      applyJob((await response.json()) as Record<string, unknown>, first);
+      return true;
+    } catch {
+      setLabel("Mất kết nối server, đang thử lại…");
+      return true;
+    }
+  }
+
+  async function attachJob(id: string) {
+    jobAttached.current = id;
+    jobRev.current = 0;
+    lsSet(JOB_KEY, id);
+    setHistoryOpen(false);
+    const found = await fetchJob(id, true);
+    if (!found) {
+      lsSet(JOB_KEY, "");
+      jobAttached.current = "";
+      setToast("Không tìm thấy lượt chạy này nữa");
+    }
+  }
+
+  async function refreshJobs() {
+    try {
+      const response = await fetch("/api/jobs", { cache: "no-store" });
+      if (response.ok) setJobs(((await response.json()) as { jobs: JobSummary[] }).jobs);
+    } catch {
+      /* bỏ qua */
+    }
+  }
+
+  function jobKeys() {
+    return settings.keys.filter(isUsable).map((item) => ({ id: item.id, provider: item.provider, label: item.label, key: item.key, account: item.account, enabled: true }));
+  }
+
+  function jobSettings() {
+    // Khóa gửi riêng trong `keys` (chỉ nằm trong bộ nhớ server); phần còn lại là cài đặt chạy.
+    const { keys: _keys, directBrowser: _direct, ...rest } = settings;
+    return rest;
+  }
+
+  async function startJob(scope?: { fresh?: boolean; prior?: SceneResult[] }) {
+    if (!scenes.length || phase === "running") return;
+    setError("");
+    setJobNotice(null);
+    setLabel("Đang gửi lên server…");
+    try {
+      if (typeof Notification !== "undefined" && Notification.permission === "default") void Notification.requestPermission();
+    } catch {
+      /* bỏ qua */
+    }
+    try {
+      const prior = scope?.fresh ? [] : scope?.prior ?? results;
+      const response = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          fileName,
+          mode: "live",
+          scenes,
+          knownNames,
+          masterScript: masterScript || undefined,
+          settings: jobSettings(),
+          keys: jobKeys(),
+          prior: prior.filter((row) => (row.status === "accepted" || row.status === "edited") && row.prompt),
+        }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { id?: string; error?: string };
+      if (!response.ok || !body.id) {
+        setError(body.error || `Server từ chối (HTTP ${response.status}).`);
+        if (/khóa|key/i.test(body.error ?? "")) setSettingsOpen(true);
+        setPhase("ready");
+        return;
+      }
+      setLastMode("live");
+      setPhase("running");
+      setStartedAt(Date.now());
+      setLabel("Đã giao cho server chạy nền. Bạn có thể đóng tab.");
+      setToast("Đang chạy nền ở server. Đóng tab cũng được.");
+      await attachJob(body.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? `Không gọi được server: ${caught.message}` : "Không gọi được server.");
+      setPhase("ready");
+    }
+  }
+
+  async function resumeJob(id: string) {
+    setJobNotice(null);
+    try {
+      const response = await fetch(`/api/jobs/${id}/resume`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ keys: jobKeys(), settings: jobSettings() }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        setError(body.error || `Server từ chối (HTTP ${response.status}).`);
+        return;
+      }
+      setError("");
+      await attachJob(id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Không chạy tiếp được.");
+    }
+  }
+
+  async function cancelJob() {
+    const id = jobAttached.current;
+    if (!id) return;
+    try {
+      await fetch(`/api/jobs/${id}/cancel`, { method: "POST" });
+    } catch {
+      /* lần poll sau sẽ báo trạng thái */
+    }
+  }
+
+  async function deleteJob(id: string) {
+    try {
+      const response = await fetch(`/api/jobs/${id}`, { method: "DELETE" });
+      if (response.ok && jobAttached.current === id) {
+        jobAttached.current = "";
+        lsSet(JOB_KEY, "");
+        setJob(null);
+      }
+    } catch {
+      /* bỏ qua */
+    }
+    await refreshJobs();
+  }
+
+  function dismissNotice() {
+    if (jobNotice) lsSet(JOB_SEEN_KEY, jobNotice.id);
+    setJobNotice(null);
+  }
+
   async function run(mode: "mock" | "live", scope?: { only?: string[]; fresh?: boolean; prior?: SceneResult[] }) {
     if (!scenes.length || phase === "running") return;
+    // Chạy cả file với khóa thật → server chạy nền (đóng tab vẫn chạy). Mô phỏng và viết lại 1 cảnh vẫn chạy ngay trên trình duyệt.
+    if (mode === "live" && !scope?.only) return startJob(scope);
     const lanes = buildLanes(settings, health, mode);
     if (!lanes.length) {
       setError("Chưa có khóa API. Dán khóa trong Cài đặt, hoặc bấm Chạy mô phỏng.");
@@ -284,7 +561,8 @@ export function useStudio() {
   }
 
   function stop() {
-    abortRef.current?.abort();
+    if (abortRef.current) abortRef.current.abort();
+    else void cancelJob();
   }
 
   async function saveEdit(sceneId: string, patch: { title: string; environment: string; prompt: string; cast: string }) {
@@ -368,45 +646,22 @@ export function useStudio() {
     }
   }
 
-  function download(kind: "json" | "txt" | "flow" | "flowsheet" | "numbered" | "csv") {
-    const stamp = fileName.replace(/\.(srt|txt)$/i, "") || "storyprompt";
-    let filename = `${stamp}.txt`;
-    let body = "";
-    if (kind === "txt") body = toCopyText(scenes, results, flowOptions());
-    if (kind === "flowsheet") {
-      filename = `${stamp}.flow.txt`;
-      body = toFlowSheet(scenes, results, flowOptions());
-    }
-    if (kind === "numbered") {
-      filename = `${stamp}.numbered.txt`;
-      body = toNumberedText(scenes, results, flowOptions());
-    }
-    if (kind === "csv") {
-      filename = `${stamp}.csv`;
-      body = toCsv(scenes, results, flowOptions());
-    }
-    if (kind === "flow") {
-      filename = `${stamp}.flow.json`;
-      body = JSON.stringify(toFlowHandoff(scenes, results, flowOptions()), null, 2);
-    }
-    if (kind === "json") {
-      filename = `${stamp}.json`;
-      body = JSON.stringify({ fileName, bible, names: knownNames, masterScript, scenes: scenes.map((scene) => ({ ...scene, result: results.find((row) => row.sceneId === scene.sceneId) })), report, logs }, null, 2);
-    }
-    if (!body) {
+  function download(kind: ExportKind) {
+    const file = buildExport(kind, { fileName, scenes, results, options: flowOptions(), names: knownNames, bible, masterScript, report, logs });
+    if (!file) {
       setToast("Chưa có nội dung để tải");
       return;
     }
-    const blob = new Blob([body], { type: kind === "txt" || kind === "flowsheet" || kind === "numbered" ? "text/plain" : kind === "csv" ? "text/csv" : "application/json" });
+    const blob = new Blob([file.body], { type: file.mime });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = filename;
+    link.download = file.filename;
     link.click();
     URL.revokeObjectURL(url);
   }
 
-  const elapsed = phase === "running" && startedAt ? tick - startedAt : report?.wallTimeMs ?? 0;
+  const elapsed = phase === "running" && startedAt ? tick - startedAt : job && jobAttached.current === job.id ? job.elapsedMs : report?.wallTimeMs ?? 0;
 
   return {
     settings,
@@ -464,5 +719,19 @@ export function useStudio() {
     copyAll,
     download,
     project,
+    job,
+    jobs,
+    jobNotice,
+    dismissNotice,
+    historyOpen,
+    openHistory: () => {
+      setHistoryOpen(true);
+      void refreshJobs();
+    },
+    closeHistory: () => setHistoryOpen(false),
+    refreshJobs,
+    attachJob,
+    resumeJob,
+    deleteJob,
   };
 }

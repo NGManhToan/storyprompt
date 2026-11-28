@@ -142,6 +142,7 @@ export function buildSlots(
 ): LaneSlot[] {
   return lanes.map((provider) => {
     const live = options.mode === "live";
+    const backup = live && provider.lane !== settings.lane;
     const usageKey = provider.usageKey ?? provider.lane;
     const day = live ? options.usage(usageKey) : { dayKey: new Date().toISOString().slice(0, 10), count: 0, neurons: 0 };
     const common = {
@@ -157,12 +158,14 @@ export function buildSlots(
     if (provider.lane === "groq") {
       return {
         provider,
+        backup,
         scheduler: createScheduler({ ...common, rpm: settings.groqRpm, tpm: settings.groqTpm, otpm: settings.groqOtpm, rpd: settings.groqRpd }),
       };
     }
     if (provider.lane === "cloudflare") {
       return {
         provider,
+        backup,
         neurons: (input: number, output: number) => cfNeurons(settings.cfModel, input, output),
         scheduler: createScheduler({
           ...common,

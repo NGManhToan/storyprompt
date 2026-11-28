@@ -147,3 +147,13 @@ Sau mỗi lượt, giữ báo cáo (JSON đầy đủ có `report` và `logs`).
 - “Đã rời / đi khuất / vắng mặt” mới coi là ra khỏi khung. Các cách diễn đạt khác có thể sót.
 - Chưa có extension Chrome. Gói Flow là JSON một prompt mỗi cảnh.
 - Quota free tier đổi theo tài khoản. Số mặc định là điểm xuất phát, không phải hạn mức chính thức của Google.
+
+
+## Chạy nền (background job)
+
+Bấm **Chạy** là server tự chạy cả lượt, không phụ thuộc trình duyệt: có thể đóng tab hoặc tắt trình duyệt, mở lại sẽ tự nối đúng lượt chạy (jobId lưu trong localStorage) và hiện "Xong lượt chạy" kèm tổng thời gian.
+
+- `POST /api/jobs` (SRT/scenes + cài đặt + khóa từ trình duyệt nếu có) trả `{id}`; `GET /api/jobs`; `GET /api/jobs/:id[?rev=N]`; `POST /api/jobs/:id/cancel|resume`; `DELETE /api/jobs/:id`; `GET /api/jobs/:id/export?kind=flowsheet|json|…`.
+- Trạng thái và kết quả lưu ở thư mục `jobs/` (đã gitignore). Khóa API không bao giờ ghi ra đĩa; server khởi động lại thì job dùng khóa `.env` tự chạy tiếp, job dùng khóa từ trình duyệt chuyển sang "Bị ngắt" và cần bấm "Chạy tiếp".
+- Lane mặc định: Gemini chính, Cloudflare dự phòng (chỉ nhận lô khi Gemini phải chờ > 20 giây), Groq tắt.
+- Lịch sử chạy: nút đồng hồ ở thanh trái.

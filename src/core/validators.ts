@@ -252,9 +252,12 @@ export function validateDraft(
   const place = new Set(contentWords(draft.environment ?? ""));
   const actionWords = (text: string) => contentWords(text).filter((word) => !place.has(word));
   const grams = fourGrams(actionWords(prompt));
+  // Câu bị cắt đôi giữa hai cue: cụm chữ có trong lời của chính cảnh này thì cảnh này buộc phải nhắc lại,
+  // đó không phải mượn hành động của cảnh bên cạnh (chỉ cụm KHÔNG nằm trong lời cảnh này mới bị tính).
+  const ownGrams = fourGrams(contentWords(task.source));
   for (const neighbor of neighborPrompts) {
     if (neighbor.sceneId === task.sceneId) continue;
-    const shared = [...fourGrams(actionWords(neighbor.prompt))].find((gram) => grams.has(gram));
+    const shared = [...fourGrams(actionWords(neighbor.prompt))].find((gram) => grams.has(gram) && !ownGrams.has(gram));
     if (shared) {
       borrow.push(`Cụm hành động trùng cảnh ${neighbor.sceneId}: “${shared}”.`);
       break;

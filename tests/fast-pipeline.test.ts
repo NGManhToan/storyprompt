@@ -403,3 +403,57 @@ describe("router: hết hạn mức ngày", () => {
     expect(router.state().find((row) => row.lane === "groq")?.exhausted).toBeTruthy();
   });
 });
+
+describe("lane dự phòng", () => {
+  const ok = (lane: "gemini" | "cloudflare"): Provider => ({
+    lane,
+    model: lane,
+    available: true,
+    async generate(): Promise<GenerateResponse> {
+      return { text: "{}", finishReason: "stop", model: lane, lane, usage: { promptTokens: 1, outputTokens: 1, totalTokens: 2 } };
+    },
+  });
+
+  it("lane chính nhận hết lô khi chỉ phải chờ ngắn; lane dự phòng không chen vào", async () => {
+    const time = clock();
+    const sched = (rpm: number) => createScheduler({ rpm, tpm: 1_000_000, rpd: 1_000, now: time.now, sleep: time.sleep });
+    const router = createRouter({
+      slots: [
+        { provider: ok("gemini"), scheduler: sched(100) },
+        { provider: ok("cloudflare"), scheduler: sched(100), backup: true },
+      ],
+      now: time.now,
+      sleep: time.sleep,
+      onLog: () => undefined,
+    });
+    for (let i = 0; i < 5; i += 1) expect((await router.call(request([`00${i}`]), 1)).response.lane).toBe("gemini");
+  });
+
+  it("lane chính phải chờ lâu hơn 20 giây thì lane dự phòng mới nhận", async () => {
+    const time = clock();
+    const sched = (rpm: number) => createScheduler({ rpm, tpm: 1_000_000, rpd: 1_000, now: time.now, sleep: time.sleep });
+    const router = createRouter({
+      slots: [
+        { provider: ok("gemini"), scheduler: sched(1) },
+        { provider: ok("cloudflare"), scheduler: sched(100), backup: true },
+      ],
+      now: time.now,
+      sleep: time.sleep,
+      onLog: () => undefined,
+    });
+    expect((await router.call(request(["001"]), 1)).response.lane).toBe("gemini");
+    // RPM 1: lô thứ hai phải đợi ~60 giây → chuyển sang dự phòng.
+    expect((await router.call(request(["002"]), 1)).response.lane).toBe("cloudflare");
+  });
+
+  it("chỉ có lane dự phòng thì vẫn chạy bình thường", async () => {
+    const time = clock();
+    const router = createRouter({
+      slots: [{ provider: ok("cloudflare"), scheduler: createScheduler({ rpm: 100, tpm: 1_000_000, rpd: 1_000, now: time.now, sleep: time.sleep }), backup: true }],
+      now: time.now,
+      sleep: time.sleep,
+      onLog: () => undefined,
+    });
+    expect((await router.call(request(["001"]), 1)).response.lane).toBe("cloudflare");
+  });
+});

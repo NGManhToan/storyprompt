@@ -10,3 +10,4 @@ playwright-report
 netlify/.netlify
 bench-results
 samples
+jobs

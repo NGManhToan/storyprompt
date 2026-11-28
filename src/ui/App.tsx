@@ -25,9 +25,11 @@ import {
   Sparkles,
   Sun,
   Trash2,
+  History,
 } from "lucide-react";
 import type { SceneResult } from "../core/types.js";
 import { composeFlowPrompt, FLOW_STYLE_FOOTER, referencesFor } from "../core/flow.js";
+import { formatElapsed } from "./useStudio.js";
 import { KeyManager } from "./KeyManager.js";
 import { loadStills, saveStills } from "./storage.js";
 import { useStudio } from "./useStudio.js";
@@ -264,6 +266,22 @@ export function App() {
           </button>
         </div>
       </header>
+      {studio.jobNotice ? (
+        <div className={studio.jobNotice.tone === "ok" ? "job-notice ok" : "job-notice warn"} role="status" data-testid="job-notice">
+          <b>{studio.jobNotice.text}</b>
+          <span className="job-actions">
+            <a href={`/api/jobs/${studio.jobNotice.id}/export?kind=flowsheet`} download>Tải Flow (.flow.txt)</a>
+            <a href={`/api/jobs/${studio.jobNotice.id}/export?kind=json`} download>JSON</a>
+            {studio.jobNotice.canResume ? <button type="button" onClick={() => void studio.resumeJob(studio.jobNotice!.id)}>Chạy tiếp cảnh chưa đạt</button> : null}
+            <button type="button" onClick={studio.dismissNotice}>Đóng</button>
+          </span>
+        </div>
+      ) : studio.phase === "running" && studio.job ? (
+        <div className="job-notice run" role="status" data-testid="job-running">
+          <b>Đang chạy nền ở server · {studio.job.accepted}/{studio.job.sceneCount} cảnh · {formatElapsed(studio.elapsed)}</b>
+          <span>Bạn có thể đóng tab, mở lại sẽ tự nối tiếp.</span>
+        </div>
+      ) : null}
       <main
         className={studio.scenes.length ? (collapsed ? "collapsed" : undefined) : "empty"}
         onDragOver={(event) => event.preventDefault()}
@@ -273,6 +291,7 @@ export function App() {
           <button type="button" title="Trang chủ" onClick={() => { setCollapsed(false); setListFilter("all"); }}><House /></button>
           <button className="primary" type="button" title="Danh sách cảnh" onClick={() => setCollapsed(false)}><LayoutGrid /></button>
           <button type="button" title="Báo cáo" onClick={() => setReportOpen(true)}><BarChart3 /></button>
+          <button type="button" title="Lịch sử chạy" onClick={studio.openHistory}><History /></button>
           <button type="button" title="Mở tệp" onClick={openFile}><Folder /></button>
           <button type="button" title="Cài đặt" onClick={() => studio.setSettingsOpen(true)}><Settings /></button>
           <button className="collapse" type="button" title={collapsed ? "Mở danh sách" : "Thu danh sách"} onClick={() => setCollapsed((value) => !value)}><ChevronRight /></button>
@@ -361,6 +380,7 @@ export function App() {
       </main>
       <input ref={imageRef} type="file" accept="image/*" multiple onChange={(event) => { if (event.target.files && selected) void addImages(selected.sceneId, [...event.target.files]); event.target.value = ""; }} />
       <div id="toast" role="status" style={{ display: notice || studio.toast || studio.error ? "block" : "none" }}>{studio.error || notice || studio.toast}</div>
+      {studio.historyOpen ? <HistoryDialog studio={studio} /> : null}
       {reportOpen ? <ReportDialog studio={studio} counts={counts} onClose={() => setReportOpen(false)} /> : null}
       {studio.settingsOpen ? <SettingsDrawer studio={studio} onClose={() => studio.setSettingsOpen(false)} /> : null}
       {studio.resumeOffer ? (
@@ -525,6 +545,49 @@ function SceneWorkspace({
         </dialog>
       ) : null}
     </>
+  );
+}
+
+const STATUS_TEXT: Record<string, string> = {
+  queued: "Đang xếp hàng",
+  running: "Đang chạy",
+  done: "Xong",
+  error: "Dừng vì lỗi",
+  cancelled: "Đã dừng",
+  interrupted: "Bị ngắt (server khởi động lại)",
+};
+
+function HistoryDialog({ studio }: { studio: ReturnType<typeof useStudio> }) {
+  return (
+    <div className="scrim" onClick={studio.closeHistory} role="presentation">
+      <dialog className="report history" open aria-label="Lịch sử chạy" onClick={(event) => event.stopPropagation()}>
+        <button type="button" onClick={studio.closeHistory}>Đóng ×</button>
+        <h2>Lịch sử chạy</h2>
+        <p>Các lượt chạy nền được lưu trên máy (thư mục jobs/ của server), mở lại bất cứ lúc nào.</p>
+        {studio.jobs.length === 0 ? <p>Chưa có lượt chạy nào.</p> : (
+          <ul className="job-list">
+            {studio.jobs.map((row) => (
+              <li key={row.id} data-testid="job-row">
+                <div>
+                  <b>{row.fileName}</b> <small>{new Date(row.createdAt).toLocaleString("vi-VN")}</small>
+                  <div>
+                    {STATUS_TEXT[row.status] ?? row.status} · {row.accepted}/{row.sceneCount} cảnh đạt{row.failed ? ` · ${row.failed} chưa đạt` : ""} · {formatElapsed(row.elapsedMs)}
+                    {row.requests ? ` · ${row.requests} request` : ""}{row.rateLimited ? ` · ${row.rateLimited} lần 429` : ""}
+                  </div>
+                </div>
+                <span className="job-actions">
+                  <button type="button" className="primary" onClick={() => void studio.attachJob(row.id)}>Mở</button>
+                  <a href={`/api/jobs/${row.id}/export?kind=flowsheet`} download>Flow .flow.txt</a>
+                  <a href={`/api/jobs/${row.id}/export?kind=json`} download>JSON</a>
+                  {row.status !== "running" && row.status !== "queued" && (row.status !== "done" || row.failed > 0) ? <button type="button" onClick={() => void studio.resumeJob(row.id)}>Chạy tiếp</button> : null}
+                  {row.status !== "running" && row.status !== "queued" ? <button type="button" onClick={() => void studio.deleteJob(row.id)}>Xoá</button> : null}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </dialog>
+    </div>
   );
 }
 

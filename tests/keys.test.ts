@@ -53,6 +53,15 @@ describe("quản lý khóa API", () => {
   });
 });
 
+describe("mặc định lane", () => {
+  it("Groq tắt mặc định (Gemini chính, Cloudflare dự phòng)", () => {
+    expect(defaultSettings.useGroq).toBe(false);
+    const lanes = buildLanes(withKeys([key({ id: "q1", provider: "groq" }), key({ id: "g1", provider: "gemini" })]), noServer, "live");
+    expect(lanes.map((lane) => lane.lane)).toEqual(["gemini"]);
+    expect(migrateSettings({ useGroq: true } as Partial<Settings>).useGroq).toBe(false);
+  });
+});
+
 describe("mỗi khóa là một lane riêng", () => {
   it("tạo một provider cho mỗi khóa dùng được, bỏ khóa tắt và Cloudflare thiếu account", () => {
     const settings = withKeys([
@@ -62,7 +71,7 @@ describe("mỗi khóa là một lane riêng", () => {
       key({ id: "q1", provider: "groq" }),
       key({ id: "c1", provider: "cloudflare", account: ACCOUNT }),
       key({ id: "c2", provider: "cloudflare", account: "" }),
-    ]);
+    ], { useGroq: true });
     const lanes = buildLanes(settings, noServer, "live");
     expect(lanes.map((lane) => `${lane.lane}:${lane.keyId}`)).toEqual(["gemini:g1", "gemini:g2", "groq:q1", "cloudflare:c1"]);
     expect(new Set(lanes.map((lane) => lane.usageKey)).size).toBe(4);

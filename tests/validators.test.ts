@@ -165,6 +165,31 @@ describe("validateDraft", () => {
     expect(result.rejections.map((item) => item.code)).toContain("borrowedAction");
   });
 
+  it("câu bị cắt đôi giữa hai cue: cụm có trong lời của chính cảnh thì không tính là mượn; cụm ngoài lời cảnh vẫn bị loại", () => {
+    const phrase = "high-yield savings account balance";
+    const own = `and scroll down to the ${phrase}, confirming the exact figure resting in the ledger.`;
+    const neighborPrompt = `Close shot of a phone showing the ${phrase} on a lit screen beside a ceramic mug on a wooden desk in soft light.`;
+    const mine = `Detail shot of a mobile device screen displaying the ${phrase} with the exact figure resting in the ledger under plain overhead light.`;
+    const ok = validateDraft(
+      draft({ prompt: mine, visible_cast: [], source_anchor: own, environment: "Desk" }),
+      task(own, "143"),
+      names,
+      [{ sceneId: "142", prompt: neighborPrompt }],
+      new Map(),
+    );
+    expect(ok.rejections.map((item) => item.code)).not.toContain("borrowedAction");
+    // cùng prompt nhưng lời cảnh không hề nhắc cụm đó → vẫn là mượn hành động.
+    const other = "Lan nhìn ra cửa sổ và thở dài thật khẽ.";
+    const bad = validateDraft(
+      draft({ prompt: mine, visible_cast: [], source_anchor: other, environment: "Desk" }),
+      task(other, "143"),
+      names,
+      [{ sceneId: "142", prompt: neighborPrompt }],
+      new Map(),
+    );
+    expect(bad.rejections.map((item) => item.code)).toContain("borrowedAction");
+  });
+
   it("rejects a repeated action phrase and a repeated visual key", () => {
     const copied = "Lan lowers the iron teapot onto the scarred wooden table as rain threads the dark kitchen glass, medium shot.";
     const neighborPrompt = `${copied.replace(/\.$/, "")} with shallow focus and a practical lamp.`;

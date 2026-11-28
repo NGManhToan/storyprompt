@@ -9,6 +9,8 @@ export type LaneSlot = {
   scheduler: Scheduler;
   /** Ước lượng neuron cho Cloudflare (input, output) → neuron. */
   neurons?: (inputTokens: number, outputTokens: number) => number;
+  /** Lane dự phòng: chỉ nhận lô khi lane chính hết/nghỉ lâu hơn BACKUP_AFTER_MS (giữ chất lượng đồng nhất). */
+  backup?: boolean;
 };
 
 type SlotState = {
@@ -31,6 +33,8 @@ export type Router = {
 const MAX_TRIES = 10;
 /** Không đợi lane nghỉ quá lâu một lèo; ngủ từng đoạn rồi xét lại vì lane khác có thể rảnh trước. */
 const MAX_NAP_MS = 15_000;
+/** Lane chính phải đợi quá chừng này thì lane dự phòng mới được nhận lô. */
+export const BACKUP_AFTER_MS = 20_000;
 
 function estimateOf(slot: LaneSlot, request: GenerateRequest): Estimate {
   const input = request.estimatedInputTokens ?? Math.ceil(request.estimatedTokens * 0.7);
@@ -71,9 +75,9 @@ export function createRouter(args: {
     });
   }
 
-  function pick(request: GenerateRequest): { slot: LaneSlot; wait: number } | null {
+  function scan(group: LaneSlot[], request: GenerateRequest): { slot: LaneSlot; wait: number } | null {
     let best: { slot: LaneSlot; wait: number } | null = null;
-    for (const slot of slots) {
+    for (const slot of group) {
       const state = states.get(slot)!;
       if (state.disabled || state.exhausted) continue;
       const estimate = estimateOf(slot, request);
@@ -94,6 +98,15 @@ export function createRouter(args: {
       if (wait === 0) break;
     }
     return best;
+  }
+
+  function pick(request: GenerateRequest): { slot: LaneSlot; wait: number } | null {
+    const primary = scan(slots.filter((slot) => !slot.backup), request);
+    // Lane chính còn khả dụng và không phải chờ lâu → không đụng tới lane dự phòng.
+    if (primary && primary.wait <= BACKUP_AFTER_MS) return primary;
+    const backup = scan(slots.filter((slot) => slot.backup), request);
+    if (primary && backup) return backup.wait < primary.wait ? backup : primary;
+    return primary ?? backup;
   }
 
   async function call(request: GenerateRequest, attempt: number) {

@@ -33,6 +33,8 @@ export type Settings = RunSettings & {
   aspectRatio: string;
   /** Thêm "--ar 16:9" cuối prompt (kiểu Midjourney của AI Studio). Flow không cần, nên mặc định tắt. */
   arSuffix: boolean;
+  /** true khi đã chuyển mặc định lane mới (Gemini chính, Cloudflare dự phòng, Groq tắt). */
+  lanesV2?: boolean;
 };
 
 const LEGACY_FOOTER = "modern 2D webtoon comic style, crisp ink line art, cel-shaded, warm daylight, clean frame, no text, 16:9";
@@ -53,7 +55,7 @@ export const defaultSettings: Settings = {
   tpm: DEFAULT_LIMITS.gemini.tpm,
   rpd: DEFAULT_LIMITS.gemini.rpd,
   useGemini: true,
-  useGroq: true,
+  useGroq: false,
   useCloudflare: true,
   groqRpm: DEFAULT_LIMITS.groq.rpm,
   groqTpm: DEFAULT_LIMITS.groq.tpm,
@@ -76,6 +78,7 @@ export const defaultSettings: Settings = {
   extraNames: DEFAULT_CHARACTERS.join(", "),
   aspectRatio: "16:9",
   arSuffix: false,
+  lanesV2: true,
 };
 
 const SETTINGS_KEY = "storyprompt.settings.v4";
@@ -100,6 +103,11 @@ export function migrateSettings(raw: LegacyShape): Settings {
   if (!merged.extraNames?.trim()) merged.extraNames = defaultSettings.extraNames;
   if (!merged.aspectRatio) merged.aspectRatio = defaultSettings.aspectRatio;
   if (typeof merged.arSuffix !== "boolean") merged.arSuffix = false;
+  // Mặc định mới: Gemini chính, Cloudflare dự phòng, Groq tắt (đo 27/11: Groq 0/2 cảnh đạt).
+  if (raw.lanesV2 !== true) {
+    merged.useGroq = false;
+    merged.lanesV2 = true;
+  }
   // Hậu tố webtoon cũ (mặc định trước đây) → khối phong cách theo ảnh nhân vật.
   if (merged.footer === LEGACY_FOOTER) merged.footer = defaultSettings.footer;
   return merged;

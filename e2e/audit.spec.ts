@@ -146,6 +146,7 @@ test("save failed when storage throws", async ({ page }) => {
 
 test("image add, lightbox, remove, and failed rewrite keeps the prompt", async ({ page }) => {
   await page.route("**/api/generate", (route) => route.fulfill({ status: 504, contentType: "application/json", body: "{\"error\":\"timeout\"}" }));
+  await page.route("**/api/jobs", (route) => route.fulfill({ status: 504, contentType: "application/json", body: "{\"error\":\"timeout\"}" }));
   await page.goto("/");
   await dropSrt(page, "image-one.srt");
   await page.locator("#prompt").fill("Keep this prompt when the provider times out.");
@@ -168,6 +169,7 @@ test("image add, lightbox, remove, and failed rewrite keeps the prompt", async (
 
 test("invalid generate body does not wipe the prompt", async ({ page }) => {
   await page.route("**/api/generate", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "not-json" }));
+  await page.route("**/api/jobs", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "not-json" }));
   await page.goto("/");
   await dropSrt(page, "bad-json.srt");
   await page.locator("#prompt").fill("Prompt that must remain after a broken response.");

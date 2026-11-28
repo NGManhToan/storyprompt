@@ -128,3 +128,27 @@ body.dark .job-notice.run { background: #17254a; color: #a9c1ff; }
 .flow-strip { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
 .flow-thumb { display: inline-flex; align-items: flex-end; gap: 2px; }
 .flow-thumb img { height: 54px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; }
+
+/* Điện thoại: nút đủ lớn để chạm, bảng Tạo ảnh chiếm cả màn hình, ô nhập không làm iOS tự phóng to */
+@media (max-width: 600px) {
+  body { font-size: 14px; }
+  button, select, .button, .flow-actions a.button { min-height: 40px; }
+  .round, .avatar { width: 40px; height: 40px; }
+  input, textarea, select { font-size: 16px; }
+  .flow-panel { inset: 0; width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; padding: 14px; overflow-x: hidden; overflow-wrap: anywhere; }
+  .flow-panel select, .flow-panel input[type="text"], .flow-panel input:not([type]) { max-width: 100%; }
+  .flow-settings .flow-row { flex-wrap: wrap; }
+  .flow-panel * { min-width: 0; }
+  .flow-panel select { width: 100%; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .flow-panel label, .flow-panel p, .flow-panel small { max-width: 100%; white-space: normal; }
+  .flow-settings label { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .flow-settings input[type="number"] { width: 72px; }
+  .flow-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .flow-card figcaption a, .flow-card figcaption button { min-width: 40px; min-height: 40px; justify-content: center; }
+  .flow-actions { flex-direction: column; align-items: stretch; }
+  .flow-actions > * { width: 100%; justify-content: center; }
+  .flow-row input { min-width: 0; }
+  .job-notice .job-actions, .job-list .job-actions { margin-left: 0; width: 100%; }
+  .history { width: 100vw; max-width: 100vw; }
+  .actions button, .actions select { min-height: 40px; }
+}

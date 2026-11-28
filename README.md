@@ -157,3 +157,15 @@ Bấm **Chạy** là server tự chạy cả lượt, không phụ thuộc trìn
 - Trạng thái và kết quả lưu ở thư mục `jobs/` (đã gitignore). Khóa API không bao giờ ghi ra đĩa; server khởi động lại thì job dùng khóa `.env` tự chạy tiếp, job dùng khóa từ trình duyệt chuyển sang "Bị ngắt" và cần bấm "Chạy tiếp".
 - Lane mặc định: Gemini chính, Cloudflare dự phòng (chỉ nhận lô khi Gemini phải chờ > 20 giây), Groq tắt.
 - Lịch sử chạy: nút đồng hồ ở thanh trái.
+## Mở cho máy khác bằng một đường link (Cloudflare Tunnel, miễn phí)
+
+```
+npm run share        # hoặc nhấp đúp share.cmd
+```
+
+- Lệnh này chạy một **cổng đăng nhập** ở `127.0.0.1:47231` đặt trước server `47230` (không động tới server hay Chrome của Flow) và một **Quick Tunnel** `https://….trycloudflare.com`. Link hiện tại nằm ở `public-link.txt`.
+- **Link đổi mỗi khi tắt/bật lại** (Quick Tunnel không cố định). Muốn link cố định cần tên miền trong tài khoản Cloudflare (tunnel có tên).
+- Mật khẩu là `STORYPROMPT_ACCESS_PASSWORD` trong `.env` (tự tạo lần đầu, không bao giờ in ra). Đăng nhập xong cookie phiên (HttpOnly, Secure, SameSite=Lax) có hạn 30 ngày; sai 5 lần thì khoá địa chỉ đó 15 phút, sai 20 lần tổng cộng thì khoá chung 15 phút.
+- Mọi đường dẫn, kể cả `/api/flow`, đều cần đăng nhập khi đi qua link. Truy cập trực tiếp `http://localhost:47230` trên chính máy này vẫn không cần mật khẩu.
+- Cần `cloudflared`: `winget install Cloudflare.cloudflared`.
+- Ai có mật khẩu là điều khiển được tài khoản Google Flow của bạn: đừng chia sẻ.

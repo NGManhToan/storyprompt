@@ -91,3 +91,30 @@ main.empty{grid-template-columns:calc(46 * var(--u)) minmax(0,1fr)}
 body.dark .job-notice.ok { background: #12301f; color: #8fe0b0; }
 body.dark .job-notice.warn { background: #3a2c10; color: #f0c674; }
 body.dark .job-notice.run { background: #17254a; color: #a9c1ff; }
+
+/* Tạo ảnh bằng Google Flow */
+.flow-panel { position: fixed; inset: 24px; margin: auto; max-width: 980px; max-height: calc(100vh - 48px); overflow: auto; z-index: 60; border: 1px solid var(--line, #ddd); border-radius: 14px; padding: 18px 20px; background: var(--card, #fff); color: inherit; box-shadow: 0 20px 60px rgba(0,0,0,.25); }
+.flow-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.flow-head b { display: inline-flex; gap: 8px; align-items: center; font-size: 16px; }
+.flow-warn { font-size: 12px; opacity: .8; margin: 8px 0 12px; }
+.flow-steps { display: grid; gap: 10px; padding-left: 20px; margin: 0 0 14px; }
+.flow-steps li { display: grid; gap: 6px; }
+.flow-steps li.ok > span::after { content: " ✓"; color: #16a34a; font-weight: 700; }
+.flow-steps code { margin: 0 3px; padding: 1px 6px; border-radius: 6px; background: rgba(127,127,127,.15); }
+.flow-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.flow-row input { flex: 1; min-width: 180px; }
+.flow-settings { display: grid; gap: 8px; margin-bottom: 12px; }
+.flow-settings input[type="number"] { width: 80px; }
+.flow-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.flow-actions a.button { display: inline-flex; gap: 6px; align-items: center; padding: 6px 12px; border: 1px solid var(--line, #ddd); border-radius: 8px; text-decoration: none; color: inherit; }
+.flow-error { color: #dc2626; font-size: 13px; }
+.flow-progress { margin: 12px 0; display: grid; gap: 4px; }
+.flow-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.flow-card { margin: 0; border: 1px solid var(--line, #ddd); border-radius: 10px; overflow: hidden; }
+.flow-card img, .flow-empty { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: grid; place-items: center; font-size: 12px; opacity: .9; background: rgba(127,127,127,.08); }
+.flow-card.failed { border-color: #dc2626; }
+.flow-card figcaption { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px 8px; font-size: 12px; }
+.flow-card figcaption a, .flow-card figcaption button { display: inline-flex; align-items: center; gap: 2px; padding: 2px 6px; }
+.flow-strip { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.flow-thumb { display: inline-flex; align-items: flex-end; gap: 2px; }
+.flow-thumb img { height: 54px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; }

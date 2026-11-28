@@ -11,3 +11,5 @@ netlify/.netlify
 bench-results
 samples
 jobs
+.flow-profile
+flow-cache

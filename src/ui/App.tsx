@@ -26,9 +26,14 @@ import {
   Sun,
   Trash2,
   History,
+  Image as ImageIcon,
+  RefreshCw,
 } from "lucide-react";
 import type { SceneResult } from "../core/types.js";
 import { composeFlowPrompt, FLOW_STYLE_FOOTER, referencesFor } from "../core/flow.js";
+import { flowScenes } from "../core/export.js";
+import { FlowPanel } from "./FlowPanel.js";
+import { imageUrl, useFlow, type FlowHook } from "./useFlow.js";
 import { formatElapsed } from "./useStudio.js";
 import { KeyManager } from "./KeyManager.js";
 import { loadStills, saveStills } from "./storage.js";
@@ -89,6 +94,8 @@ export function App() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [dragOver, setDragOver] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const flow = useFlow(studio.project);
+  const [flowOpen, setFlowOpen] = useState(false);
 
   useEffect(() => {
     document.body.classList.toggle("dark", studio.theme === "dark");
@@ -161,6 +168,16 @@ export function App() {
   const selectedIndex = selected ? studio.scenes.findIndex((scene) => scene.sceneId === selected.sceneId) : -1;
   const usable = studio.results.some((row) => row.prompt && (row.status === "accepted" || row.status === "edited"));
   const images = selected ? stills[selected.sceneId] ?? [] : [];
+  // Prompt gửi sang Flow: đã gắn @Tên + khối phong cách; tỷ lệ chọn trong cài đặt Flow nên không thêm "--ar".
+  const flowInputs = useMemo(
+    () =>
+      flowScenes(studio.scenes, studio.results, { prefix: studio.settings.prefix, footer: studio.settings.footer, roster: studio.knownNames, aspectRatio: studio.settings.aspectRatio, arSuffix: false }).map((scene) => ({
+        sceneId: scene.id,
+        prompt: scene.prompt,
+        references: scene.references,
+      })),
+    [studio.scenes, studio.results, studio.settings.prefix, studio.settings.footer, studio.settings.aspectRatio, studio.knownNames],
+  );
 
   useEffect(() => {
     if (!selected) return;
@@ -259,6 +276,9 @@ export function App() {
               </div>
             ) : null}
           </div>
+          <button type="button" title="Tạo ảnh bằng Google Flow (chạy nền)" disabled={!usable && !flow.summary} onClick={() => setFlowOpen(true)} data-testid="flow-open">
+            <ImageIcon size={14} /> {flow.summary && flow.running ? `Ảnh ${flow.summary.done}/${flow.summary.total}` : "Tạo ảnh"}
+          </button>
           <button className="round" type="button" aria-label="Thông báo" title="Báo cáo" onClick={() => setReportOpen(true)}><Bell size={14} /></button>
           <button className="avatar" type="button" aria-label="Hồ sơ" title="Hồ sơ">T</button>
           <button id="theme" type="button" aria-label="Đổi giao diện" title="Đổi nền" onClick={() => studio.setTheme(studio.theme === "dark" ? "light" : "dark")}>
@@ -372,6 +392,8 @@ export function App() {
               onSaved={(ok) => { setSaveState(ok ? "saved" : "failed"); if (ok) setSavedAt(Date.now()); }}
               onAddImages={() => imageRef.current?.click()}
               onRemoveImage={(index) => removeImage(selected.sceneId, index)}
+              flow={flow}
+              flowInput={flowInputs.find((item) => item.sceneId === selected.sceneId)}
               confirmClear={confirmClear}
               setConfirmClear={setConfirmClear}
             />
@@ -381,6 +403,7 @@ export function App() {
       <input ref={imageRef} type="file" accept="image/*" multiple onChange={(event) => { if (event.target.files && selected) void addImages(selected.sceneId, [...event.target.files]); event.target.value = ""; }} />
       <div id="toast" role="status" style={{ display: notice || studio.toast || studio.error ? "block" : "none" }}>{studio.error || notice || studio.toast}</div>
       {studio.historyOpen ? <HistoryDialog studio={studio} /> : null}
+      {flowOpen ? <FlowPanel flow={flow} scenes={flowInputs} names={studio.knownNames} label={studio.fileName || "StoryPrompt"} onClose={() => setFlowOpen(false)} /> : null}
       {reportOpen ? <ReportDialog studio={studio} counts={counts} onClose={() => setReportOpen(false)} /> : null}
       {studio.settingsOpen ? <SettingsDrawer studio={studio} onClose={() => studio.setSettingsOpen(false)} /> : null}
       {studio.resumeOffer ? (
@@ -395,7 +418,7 @@ export function App() {
 }
 
 function SceneWorkspace({
-  studio, sceneId, title, source, timeRange, index, total, result, images, prompt, onPrompt, onPrev, onNext, onCopy, onSaved, onAddImages, onRemoveImage, confirmClear, setConfirmClear,
+  studio, sceneId, title, source, timeRange, index, total, result, images, prompt, onPrompt, onPrev, onNext, onCopy, onSaved, onAddImages, onRemoveImage, confirmClear, setConfirmClear, flow, flowInput,
 }: {
   studio: ReturnType<typeof useStudio>;
   sceneId: string;
@@ -416,6 +439,8 @@ function SceneWorkspace({
   onRemoveImage: (index: number) => void;
   confirmClear: boolean;
   setConfirmClear: (value: boolean) => void;
+  flow: FlowHook;
+  flowInput?: { sceneId: string; prompt: string; references: string[] };
 }) {
   const [photo, setPhoto] = useState(0);
   const [zoom, setZoom] = useState(false);
@@ -494,6 +519,7 @@ function SceneWorkspace({
               {refs.length ? refs.map((name) => <span key={name} className="tag">@{name}</span>) : <small>(không có nhân vật)</small>}
               <button className="mini" type="button" title="Chép prompt Flow (đã gắn @tên + phong cách)" onClick={() => onCopy(shown || prompt)}>Chép cho Flow</button>
             </div>
+            <FlowSceneStrip flow={flow} sceneId={sceneId} input={flowInput} />
           </article>
         </div>
         <article className="card gallery" hidden={images.length === 0}>
@@ -674,6 +700,25 @@ function SettingsDrawer({ studio, onClose }: { studio: ReturnType<typeof useStud
         </select></label>
         <label className="switch"><input type="checkbox" checked={settings.arSuffix} onChange={(event) => set({ ...settings, arSuffix: event.target.checked })} /><span>Thêm "--ar {settings.aspectRatio}" cuối prompt (kiểu AI Studio)</span></label>
       </aside>
+    </div>
+  );
+}
+
+/** Ảnh Flow của cảnh đang mở: xem, tải từng ảnh, tạo lại (dùng prompt hiện tại). */
+function FlowSceneStrip({ flow, sceneId, input }: { flow: FlowHook; sceneId: string; input?: { sceneId: string; prompt: string; references: string[] } }) {
+  const scene = flow.sceneImages(sceneId);
+  if (!flow.jobId || !scene) return null;
+  return (
+    <div className="flow-strip" data-testid="flow-strip">
+      <small>Ảnh Flow:</small>
+      {scene.images.map((image) => (
+        <span key={image.file} className="flow-thumb">
+          <a href={imageUrl(flow.jobId, image.file)} target="_blank" rel="noreferrer"><img src={imageUrl(flow.jobId, image.file)} alt={`Ảnh Flow cảnh ${sceneId}`} /></a>
+          <a href={imageUrl(flow.jobId, image.file, true)} download title="Tải ảnh này"><Download size={12} /></a>
+        </span>
+      ))}
+      {!scene.images.length ? <small>{scene.status === "running" ? "đang vẽ…" : scene.status === "failed" ? `lỗi: ${scene.error ?? ""}` : scene.status === "skipped" ? "đã bỏ qua" : "đang chờ"}</small> : null}
+      <button className="mini" type="button" title="Tạo lại ảnh cảnh này bằng prompt hiện tại" disabled={scene.status === "running" || flow.busy} onClick={() => void flow.regen(sceneId, input?.prompt, input?.references)}><RefreshCw size={12} /> Tạo lại</button>
     </div>
   );
 }

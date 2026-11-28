@@ -7,6 +7,10 @@ import { fileUsage } from "./src/server/jobLanes.js";
 import { JobManager } from "./src/server/jobs.js";
 import { handleJobsApi, isJobsPath } from "./src/server/jobsApi.js";
 import { loadEnvFiles } from "./src/server/env.js";
+import { handleFlowApi, isFlowPath } from "./src/server/flow/api.js";
+import { FlowBrowser } from "./src/server/flow/chrome.js";
+import { PlaywrightFlowDriver } from "./src/server/flow/driver.js";
+import { FlowImageManager } from "./src/server/flow/imageJobs.js";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 loadEnvFiles(root);
@@ -22,9 +26,14 @@ for (const id of jobs.interruptedServerJobs()) {
   const resumed = jobs.resume(id, []);
   console.log(resumed.ok ? `[jobs] tự chạy tiếp ${id}` : `[jobs] không chạy tiếp được ${id}: ${resumed.error}`);
 }
+// Nút "Tạo ảnh": Chrome hồ sơ riêng .flow-profile/ (đăng nhập Google do bạn tự làm) + ảnh tạm ở flow-cache/ (cả hai gitignored).
+const flowBrowser = new FlowBrowser({ profileDir: process.env.STORYPROMPT_FLOW_PROFILE || join(root, ".flow-profile"), port: Number(process.env.STORYPROMPT_FLOW_CDP_PORT) || 9333 });
+const flowDriver = new PlaywrightFlowDriver(flowBrowser);
+const flowImages = new FlowImageManager({ dir: process.env.STORYPROMPT_FLOW_CACHE || join(root, "flow-cache"), driver: flowDriver });
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     jobs.flush();
+    flowImages.flush();
     process.exit(0);
   });
 }
@@ -39,6 +48,8 @@ const types: Record<string, string> = {
   ".srt": "text/plain; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
   ".woff2": "font/woff2",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
 };
 
 async function readBody(req: IncomingMessage, limit = 2_000_000): Promise<Buffer> {
@@ -84,6 +95,26 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse) {
 const server = createServer(async (req, res) => {
   try {
     const url = req.url ?? "/";
+    if (url.startsWith("/api") && isFlowPath(url.split("?")[0])) {
+      // Điều khiển tài khoản Google của bạn: chỉ nhận lệnh từ chính máy này, không từ máy khác trong wifi.
+      const remote = req.socket.remoteAddress ?? "";
+      if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remote)) {
+        res.writeHead(403, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "Tạo ảnh Flow chỉ dùng được trên chính máy chạy server." }));
+        return;
+      }
+      const body = req.method === "GET" || req.method === "HEAD" || req.method === "DELETE" ? undefined : await readBody(req, 4_000_000);
+      const headers = new Headers();
+      for (const [key, value] of Object.entries(req.headers)) {
+        if (typeof value === "string") headers.set(key, value);
+        else if (Array.isArray(value)) headers.set(key, value.join(", "));
+      }
+      const request = new Request(`http://${req.headers.host ?? "localhost"}${url}`, { method: req.method, headers, body: body ? new Uint8Array(body) : undefined });
+      const response = await handleFlowApi(request, flowImages, flowDriver);
+      send(res, response);
+      res.end(Buffer.from(await response.arrayBuffer()));
+      return;
+    }
     if (url.startsWith("/api")) {
       const body = req.method === "GET" || req.method === "HEAD" || req.method === "DELETE" ? undefined : await readBody(req, isJobsPath(url.split("?")[0]) ? 12_000_000 : 2_000_000);
       const headers = new Headers();
